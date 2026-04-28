@@ -10,7 +10,11 @@ jobs:
     docker:
       - image: cimg/base:stable
     steps:
-      - checkout
+      - run:
+          name: Checkout source via HTTPS
+          command: |
+            git clone "https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git" .
+            git checkout "$CIRCLE_SHA1"
       - continuation/continue:
           configuration_path: .rs-ci/.circleci/config.yml
 
