@@ -50,6 +50,13 @@ fn test_tokio_task_handle_cancel_requests_abort_for_queued_task() {
             .expect("blocking task should receive release signal");
         blocker.await.expect("blocking slot task should finish");
 
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !handle.is_done() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cancelled task should finish");
         assert!(handle.is_done());
         assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
         service.shutdown();
