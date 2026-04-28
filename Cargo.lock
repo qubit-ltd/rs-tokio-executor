@@ -91,6 +91,8 @@ dependencies = [
 [[package]]
 name = "qubit-atomic"
 version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16d4f6fbee18962c1c619c432a4e6b60bc07077887da2bc196d26e82b51c23dc"
 dependencies = [
  "arc-swap",
  "portable-atomic",
@@ -99,6 +101,8 @@ dependencies = [
 [[package]]
 name = "qubit-executor"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5480f0c986a61165b45a8ae0418883380e5cc652676e63b62da4b33a14bebb21"
 dependencies = [
  "qubit-atomic",
  "qubit-function",
@@ -109,6 +113,8 @@ dependencies = [
 [[package]]
 name = "qubit-function"
 version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6370fe314da35a8a37c6282678e63b8533ba18ce3c6f9c6569f58905a52809a2"
 dependencies = [
  "parking_lot",
  "pastey",
@@ -117,6 +123,8 @@ dependencies = [
 [[package]]
 name = "qubit-lock"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d22fe24041377f0f55084cba90ed3ce359ef718213bae39c97d99b6e678ad02"
 dependencies = [
  "parking_lot",
  "tokio",

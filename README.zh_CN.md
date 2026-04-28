@@ -47,7 +47,7 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 
 `submit` 或 `spawn` 成功只表示服务接受了任务。任务结果通过 `TokioTaskHandle` 报告。
 
-`shutdown` 拒绝新任务，并允许已接受任务完成。`shutdown_now` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务通过 Tokio abort handle 中止；通过 Tokio 提交的 blocking 任务可以在服务侧标记取消，但已经运行的 blocking 代码不能被 Rust 强制停止。
+`shutdown` 拒绝新任务，并允许已接受任务完成。`shutdown_now` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务通过 Tokio abort handle 中止；通过 Tokio 提交的 blocking 任务只能在开始前取消，已经运行的 blocking 代码不能被 Rust 强制停止，服务终止会等待这些代码返回。
 
 ## 快速开始
 
@@ -58,14 +58,16 @@ use std::io;
 
 use qubit_tokio_executor::{ExecutorService, TokioExecutorService};
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
-let service = TokioExecutorService::new();
-let handle = service.submit_callable(|| Ok::<usize, io::Error>(40 + 2))?;
-assert_eq!(handle.await?, 42);
-service.shutdown();
-service.await_termination().await;
-# Ok(())
-# }
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let service = TokioExecutorService::new();
+    let handle = service.submit_callable(|| Ok::<usize, io::Error>(40 + 2))?;
+    assert_eq!(handle.await?, 42);
+    service.shutdown();
+    service.await_termination().await;
+
+    Ok(())
+}
 ```
 
 ### Async IO future
@@ -75,14 +77,16 @@ use std::io;
 
 use qubit_tokio_executor::TokioIoExecutorService;
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
-let service = TokioIoExecutorService::new();
-let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
-assert_eq!(handle.await?, 42);
-service.shutdown();
-service.await_termination().await;
-# Ok(())
-# }
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let service = TokioIoExecutorService::new();
+    let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
+    assert_eq!(handle.await?, 42);
+    service.shutdown();
+    service.await_termination().await;
+
+    Ok(())
+}
 ```
 
 ## 如何选择 Executor

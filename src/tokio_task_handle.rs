@@ -60,6 +60,10 @@ impl<R, E> TokioTaskHandle<R, E> {
 
     /// Requests cancellation of the underlying Tokio task.
     ///
+    /// For blocking tasks submitted through `spawn_blocking`, Tokio can prevent
+    /// execution only if the task has not started yet. Already running blocking
+    /// work continues until the closure returns.
+    ///
     /// # Returns
     ///
     /// `true` after cancellation has been requested.

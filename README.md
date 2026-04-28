@@ -62,9 +62,10 @@ The task result is reported through `TokioTaskHandle`.
 
 `shutdown` rejects new tasks and lets accepted tasks finish. `shutdown_now`
 rejects new tasks and requests cancellation or abort for tracked Tokio tasks.
-Async IO tasks are aborted through Tokio abort handles; blocking tasks submitted
-through Tokio can be marked cancelled from the service side, but already running
-blocking code cannot be forcibly stopped by Rust.
+Async IO tasks are aborted through Tokio abort handles. Blocking tasks submitted
+through Tokio can be cancelled only before they start; already running blocking
+code cannot be forcibly stopped by Rust, and service termination waits for that
+code to return.
 
 ## Quick Start
 
@@ -75,14 +76,16 @@ use std::io;
 
 use qubit_tokio_executor::{ExecutorService, TokioExecutorService};
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
-let service = TokioExecutorService::new();
-let handle = service.submit_callable(|| Ok::<usize, io::Error>(40 + 2))?;
-assert_eq!(handle.await?, 42);
-service.shutdown();
-service.await_termination().await;
-# Ok(())
-# }
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let service = TokioExecutorService::new();
+    let handle = service.submit_callable(|| Ok::<usize, io::Error>(40 + 2))?;
+    assert_eq!(handle.await?, 42);
+    service.shutdown();
+    service.await_termination().await;
+
+    Ok(())
+}
 ```
 
 ### Async IO futures
@@ -92,14 +95,16 @@ use std::io;
 
 use qubit_tokio_executor::TokioIoExecutorService;
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
-let service = TokioIoExecutorService::new();
-let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
-assert_eq!(handle.await?, 42);
-service.shutdown();
-service.await_termination().await;
-# Ok(())
-# }
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let service = TokioIoExecutorService::new();
+    let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
+    assert_eq!(handle.await?, 42);
+    service.shutdown();
+    service.await_termination().await;
+
+    Ok(())
+}
 ```
 
 ## Choosing an Executor

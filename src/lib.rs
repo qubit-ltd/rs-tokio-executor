@@ -17,7 +17,11 @@
 mod tokio_execution;
 mod tokio_executor;
 mod tokio_executor_service;
+mod tokio_executor_service_state;
 mod tokio_io_executor_service;
+mod tokio_io_executor_service_state;
+mod tokio_io_service_task_guard;
+mod tokio_service_task_guard;
 mod tokio_task_handle;
 
 pub use qubit_executor::executor::{

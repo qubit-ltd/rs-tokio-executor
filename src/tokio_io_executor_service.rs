@@ -9,106 +9,18 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{
-        Arc,
-        Mutex,
-        MutexGuard,
-    },
-};
-
-use qubit_atomic::{
-    Atomic,
-    AtomicCount,
-};
-use tokio::{
-    sync::Notify,
-    task::AbortHandle,
+    sync::Arc,
 };
 
 use qubit_executor::TaskExecutionError;
 
 use crate::TokioTaskHandle;
+use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
+use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
 use qubit_executor::service::{
     RejectedExecution,
     ShutdownReport,
 };
-
-/// Shared state for [`TokioIoExecutorService`].
-#[derive(Default)]
-struct TokioIoExecutorServiceState {
-    /// Whether shutdown has been requested.
-    shutdown: Atomic<bool>,
-    /// Number of accepted async tasks that have not finished or been aborted.
-    active_tasks: AtomicCount,
-    /// Serializes task submission and shutdown transitions.
-    submission_lock: Mutex<()>,
-    /// Abort handles for async tasks accepted by this service.
-    abort_handles: Mutex<Vec<AbortHandle>>,
-    /// Notifies waiters once shutdown has completed and no tasks remain active.
-    terminated_notify: Notify,
-}
-
-impl TokioIoExecutorServiceState {
-    /// Acquires the submission lock while tolerating poisoned locks.
-    ///
-    /// # Returns
-    ///
-    /// A guard for the submission lock.
-    fn lock_submission(&self) -> MutexGuard<'_, ()> {
-        self.submission_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    /// Acquires the abort-handle list while tolerating poisoned locks.
-    ///
-    /// # Returns
-    ///
-    /// A guard for the tracked Tokio abort handles.
-    fn lock_abort_handles(&self) -> MutexGuard<'_, Vec<AbortHandle>> {
-        self.abort_handles
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    /// Wakes termination waiters when shutdown and task completion allow it.
-    fn notify_if_terminated(&self) {
-        if self.shutdown.load() && self.active_tasks.is_zero() {
-            self.terminated_notify.notify_waiters();
-        }
-    }
-}
-
-/// Task lifecycle guard for [`TokioIoExecutorService`].
-struct TokioIoServiceTaskGuard {
-    /// Shared service state updated when the guard is dropped.
-    state: Arc<TokioIoExecutorServiceState>,
-}
-
-impl TokioIoServiceTaskGuard {
-    /// Creates a guard that decrements the active-task count on drop.
-    ///
-    /// # Parameters
-    ///
-    /// * `state` - Shared service state whose active-task count is decremented
-    ///   when this guard is dropped.
-    ///
-    /// # Returns
-    ///
-    /// A lifecycle guard bound to the supplied service state.
-    fn new(state: Arc<TokioIoExecutorServiceState>) -> Self {
-        Self { state }
-    }
-}
-
-impl Drop for TokioIoServiceTaskGuard {
-    /// Updates service counters when an async task completes or is aborted.
-    fn drop(&mut self) {
-        if self.state.active_tasks.dec() == 0 {
-            self.state.notify_if_terminated();
-        }
-    }
-}
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///
@@ -156,14 +68,16 @@ impl TokioIoExecutorService {
             return Err(RejectedExecution::Shutdown);
         }
         self.state.active_tasks.inc();
-        drop(submission_guard);
 
-        let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state));
+        let marker = Arc::new(());
+        let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
         let handle = tokio::spawn(async move {
             let _guard = guard;
             future.await.map_err(TaskExecutionError::Failed)
         });
-        self.state.lock_abort_handles().push(handle.abort_handle());
+        self.state
+            .register_abort_handle(marker, handle.abort_handle());
+        drop(submission_guard);
         Ok(TokioTaskHandle::new(handle))
     }
 
@@ -187,12 +101,7 @@ impl TokioIoExecutorService {
         let _guard = self.state.lock_submission();
         self.state.shutdown.store(true);
         let running = self.state.active_tasks.get();
-        let mut handles = self.state.lock_abort_handles();
-        let cancellation_count = handles.len();
-        for handle in handles.drain(..) {
-            handle.abort();
-        }
-        drop(handles);
+        let cancellation_count = self.state.abort_tracked_tasks();
         self.state.notify_if_terminated();
         ShutdownReport::new(0, running, cancellation_count)
     }
