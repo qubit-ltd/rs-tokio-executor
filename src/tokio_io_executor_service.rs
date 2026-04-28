@@ -135,11 +135,15 @@ impl TokioIoExecutorService {
     /// accepted async tasks have finished or been aborted.
     pub fn await_termination(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
+            let notified = self.state.terminated_notify.notified();
+            tokio::pin!(notified);
             loop {
+                notified.as_mut().enable();
                 if self.is_terminated() {
                     return;
                 }
-                self.state.terminated_notify.notified().await;
+                notified.as_mut().await;
+                notified.set(self.state.terminated_notify.notified());
             }
         })
     }
