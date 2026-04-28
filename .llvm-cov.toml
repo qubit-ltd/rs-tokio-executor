@@ -1,0 +1,16 @@
+# cargo-llvm-cov configuration file
+# Used to configure various parameters for code coverage statistics
+
+# Exclude files that don't need coverage statistics
+[report]
+# Exclude test code
+exclude-from-report = [
+    "tests/*",
+    "benches/*",
+    "examples/*",
+]
+
+# Output format configuration
+[output]
+# Default output format is HTML
+format = "html"
