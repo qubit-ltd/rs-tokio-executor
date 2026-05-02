@@ -18,9 +18,11 @@ STYLE_TEST_DIR="${STYLE_TEST_DIR:-tests}"
 STYLE_ENFORCE_INLINE_TESTS="${STYLE_ENFORCE_INLINE_TESTS:-1}"
 STYLE_ENFORCE_TEST_FILE_NAMES="${STYLE_ENFORCE_TEST_FILE_NAMES:-1}"
 STYLE_ENFORCE_PUBLIC_TYPE_FILES="${STYLE_ENFORCE_PUBLIC_TYPE_FILES:-1}"
+STYLE_ENFORCE_EXPLICIT_IMPORTS="${STYLE_ENFORCE_EXPLICIT_IMPORTS:-1}"
 STYLE_TYPE_VISIBILITY="${STYLE_TYPE_VISIBILITY:-public}"
 STYLE_INCLUDE_TYPE_ALIASES="${STYLE_INCLUDE_TYPE_ALIASES:-0}"
 STYLE_EXTRA_EXCLUDE_REGEX="${STYLE_EXTRA_EXCLUDE_REGEX:-}"
+STYLE_ALLOWLIST_FILE="${STYLE_ALLOWLIST_FILE:-}"
 STYLE_SKIP_TYPE_PATH_REGEX="${STYLE_SKIP_TYPE_PATH_REGEX:-(^|/)(lib|main|mod|macros)\\.rs$}"
 STYLE_TEST_SUPPORT_DIR_REGEX="${STYLE_TEST_SUPPORT_DIR_REGEX:-(^|/)(support|common|fixtures|coverage_support)(/|$)}"
 
@@ -39,9 +41,11 @@ print_usage() {
     echo "  STYLE_ENFORCE_INLINE_TESTS=${STYLE_ENFORCE_INLINE_TESTS}"
     echo "  STYLE_ENFORCE_TEST_FILE_NAMES=${STYLE_ENFORCE_TEST_FILE_NAMES}"
     echo "  STYLE_ENFORCE_PUBLIC_TYPE_FILES=${STYLE_ENFORCE_PUBLIC_TYPE_FILES}"
+    echo "  STYLE_ENFORCE_EXPLICIT_IMPORTS=${STYLE_ENFORCE_EXPLICIT_IMPORTS}"
     echo "  STYLE_TYPE_VISIBILITY=${STYLE_TYPE_VISIBILITY}      # public or all"
     echo "  STYLE_INCLUDE_TYPE_ALIASES=${STYLE_INCLUDE_TYPE_ALIASES}"
     echo "  STYLE_EXTRA_EXCLUDE_REGEX=${STYLE_EXTRA_EXCLUDE_REGEX}"
+    echo "  STYLE_ALLOWLIST_FILE=${STYLE_ALLOWLIST_FILE:-<project root>/.qubit-style-allowlist}"
     echo "  STYLE_SKIP_TYPE_PATH_REGEX=${STYLE_SKIP_TYPE_PATH_REGEX}"
     echo "  STYLE_TEST_SUPPORT_DIR_REGEX=${STYLE_TEST_SUPPORT_DIR_REGEX}"
     echo ""
@@ -52,6 +56,11 @@ print_usage() {
     echo "  // qubit-style: allow public-type-layout"
     echo "  // qubit-style: allow multiple-public-types"
     echo "  // qubit-style: allow type-file-name"
+    echo "  // qubit-style: allow explicit-imports"
+    echo ""
+    echo "The multiple-public-types allow comment also requires a project-level"
+    echo "allowlist entry in STYLE_ALLOWLIST_FILE using this format:"
+    echo "  multiple-public-types | src/example.rs | Reason for keeping types together"
 }
 
 require_command() {
@@ -80,6 +89,45 @@ has_style_allow() {
 
     grep -Fq "qubit-style: allow all" "$file" \
         || grep -Fq "qubit-style: allow $rule" "$file"
+}
+
+has_approved_style_allow() {
+    local file="$1"
+    local rel_path="$2"
+    local rule="$3"
+
+    grep -Fq "qubit-style: allow $rule" "$file" || return 1
+    [ -f "$STYLE_ALLOWLIST_FILE" ] || return 1
+
+    awk -v expected_rule="$rule" -v expected_path="$rel_path" '
+        function trim(value) {
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            return value
+        }
+
+        /^[[:space:]]*(#|$)/ {
+            next
+        }
+
+        {
+            field_count = split($0, fields, /\|/)
+            if (field_count < 3) {
+                next
+            }
+
+            rule = trim(fields[1])
+            path = trim(fields[2])
+            reason = trim(fields[3])
+            if (rule == expected_rule && path == expected_path && reason != "") {
+                found = 1
+            }
+        }
+
+        END {
+            exit found ? 0 : 1
+        }
+    ' "$STYLE_ALLOWLIST_FILE"
 }
 
 is_extra_excluded() {
@@ -246,10 +294,10 @@ check_public_type_files() {
 
         count=$(printf '%s\n' "$entries" | sed '/^[[:space:]]*$/d' | wc -l | tr -d '[:space:]')
         if [ "$count" -gt 1 ]; then
-            if ! has_style_allow "$file" "multiple-public-types"; then
+            if ! has_approved_style_allow "$file" "$rel_path" "multiple-public-types"; then
                 type_summary=$(printf '%s\n' "$entries" | awk -F: '{ printf "%s %s at line %s; ", $2, $3, $1 }')
                 report_error "$rel_path" "0" \
-                    "file contains multiple ${STYLE_TYPE_VISIBILITY} top-level types; split them or add an explicit qubit-style allow comment. Found: $type_summary"
+                    "file contains multiple ${STYLE_TYPE_VISIBILITY} top-level types; split them or add both '// qubit-style: allow multiple-public-types' and a reviewed STYLE_ALLOWLIST_FILE entry. Inline allow comments alone are not accepted for this rule. Found: $type_summary"
             fi
             continue
         fi
@@ -270,6 +318,90 @@ check_public_type_files() {
                 "$kind '$type_name' should live in '${expected_stem}.rs', not '$base_name'"
         fi
     done < <(list_rs_files "$source_root")
+}
+
+scan_wildcard_imports() {
+    local file="$1"
+
+    awk '
+        /^[[:space:]]*use[[:space:]]+/ && /(^|[^[:alnum:]_])\*([[:space:],};]|$)/ {
+            line = $0
+            sub(/^[[:space:]]*/, "", line)
+            print FNR ":" line
+        }
+    ' "$file"
+}
+
+has_mod_rs_own_items() {
+    local file="$1"
+
+    awk '
+        /^[[:space:]]*(pub([[:space:]]*\([^)]*\))?[[:space:]]+)?(async[[:space:]]+fn|fn|struct|enum|trait|type|const|static|impl|macro_rules!)([[:space:]<{!(]|$)/ {
+            found = 1
+        }
+        END {
+            exit found ? 0 : 1
+        }
+    ' "$file"
+}
+
+scan_private_mod_rs_imports() {
+    local file="$1"
+
+    awk '
+        /^[[:space:]]*pub[[:space:]]+use[[:space:]]+/ {
+            next
+        }
+        /^[[:space:]]*use[[:space:]]+/ {
+            line = $0
+            sub(/^[[:space:]]*/, "", line)
+            print FNR ":" line
+        }
+    ' "$file"
+}
+
+check_explicit_imports_in_root() {
+    local root="$1"
+    local file
+    local rel_path
+    local hit
+    local line
+    local import_text
+
+    [ -d "$root" ] || return 0
+
+    while IFS= read -r file; do
+        rel_path="${file#$PROJECT_ROOT/}"
+        is_extra_excluded "$rel_path" && continue
+        has_style_allow "$file" "explicit-imports" && continue
+
+        while IFS= read -r hit; do
+            [ -n "$hit" ] || continue
+            line="${hit%%:*}"
+            import_text="${hit#*:}"
+            report_error "$rel_path" "$line" \
+                "wildcard imports hide dependencies; replace '$import_text' with explicit imports"
+        done < <(scan_wildcard_imports "$file")
+
+        if [ "$(basename "$file")" = "mod.rs" ] && ! has_mod_rs_own_items "$file"; then
+            while IFS= read -r hit; do
+                [ -n "$hit" ] || continue
+                line="${hit%%:*}"
+                import_text="${hit#*:}"
+                report_error "$rel_path" "$line" \
+                    "aggregation-only mod.rs files must not collect private imports for child modules; move '$import_text' into the concrete file that uses it"
+            done < <(scan_private_mod_rs_imports "$file")
+        fi
+    done < <(list_rs_files "$root")
+}
+
+check_explicit_imports() {
+    local source_root="$1"
+    local test_root="$2"
+
+    [ "$STYLE_ENFORCE_EXPLICIT_IMPORTS" = "1" ] || return 0
+    check_explicit_imports_in_root "$source_root"
+    check_explicit_imports_in_root "$test_root"
 }
 
 main() {
@@ -302,6 +434,9 @@ main() {
 
     script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     PROJECT_ROOT="${RS_CI_PROJECT_ROOT:-$script_dir}"
+    if [ -z "$STYLE_ALLOWLIST_FILE" ]; then
+        STYLE_ALLOWLIST_FILE="$PROJECT_ROOT/.qubit-style-allowlist"
+    fi
     cd "$PROJECT_ROOT"
 
     source_root="$PROJECT_ROOT/$STYLE_SOURCE_DIR"
@@ -313,6 +448,7 @@ main() {
     check_inline_tests "$source_root"
     check_test_file_names "$test_root"
     check_public_type_files "$source_root"
+    check_explicit_imports "$source_root" "$test_root"
 
     echo ""
     if [ "$FAILURES" -gt 0 ]; then
