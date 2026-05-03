@@ -33,6 +33,9 @@ pub struct TokioExecutorService {
     state: Arc<TokioExecutorServiceState>,
 }
 
+/// Tokio-backed blocking executor service routed through `spawn_blocking`.
+pub type TokioBlockingExecutorService = TokioExecutorService;
+
 impl TokioExecutorService {
     /// Creates a new service instance.
     ///
