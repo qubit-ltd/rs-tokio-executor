@@ -145,7 +145,7 @@ By contributing, you agree to license your contributions under the [Apache Licen
 
 ## License
 
-Copyright © 2026 Haixing Hu, Qubit Co. Ltd.
+Copyright (c) 2026. Haixing Hu.
 
 This project is licensed under the [Apache License, Version 2.0](LICENSE). See the `LICENSE` file in the repository for the full text.
 
