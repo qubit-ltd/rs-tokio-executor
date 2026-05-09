@@ -120,7 +120,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ## 许可证与版权
 
-版权所有 © 2026 Haixing Hu，Qubit Co. Ltd.。
+Copyright (c) 2026. Haixing Hu.
 
 本软件依据 [Apache License, Version 2.0](LICENSE) 授权；完整许可文本见仓库根目录的 `LICENSE` 文件。
 
