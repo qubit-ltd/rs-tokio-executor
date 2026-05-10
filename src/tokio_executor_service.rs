@@ -9,24 +9,20 @@
  ******************************************************************************/
 use std::sync::Arc;
 
-use qubit_function::Callable;
+use qubit_function::{Callable, Runnable};
 
-use qubit_executor::TaskRunner;
+use qubit_executor::{TaskCompletionPair, TaskHandle, TaskRunner, TrackedTask};
 
-use crate::TokioTaskHandle;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
 use qubit_executor::service::{
-    ExecutorService,
-    RejectedExecution,
-    ShutdownReport,
+    ExecutorService, ExecutorServiceLifecycle, RejectedExecution, StopReport,
 };
 
 /// Tokio-backed service for submitted blocking tasks.
 ///
 /// The service accepts fallible [`Runnable`](qubit_function::Runnable) and
-/// [`Callable`] tasks, runs them through Tokio, and
-/// returns awaitable handles for their final results.
+/// [`Callable`] tasks and runs them through Tokio's blocking task pool.
 #[derive(Default, Clone)]
 pub struct TokioExecutorService {
     /// Shared service state used by all clones of this service.
@@ -49,8 +45,14 @@ impl TokioExecutorService {
 }
 
 impl ExecutorService for TokioExecutorService {
-    type Handle<R, E>
-        = TokioTaskHandle<R, E>
+    type ResultHandle<R, E>
+        = TaskHandle<R, E>
+    where
+        R: Send + 'static,
+        E: Send + 'static;
+
+    type TrackedHandle<R, E>
+        = TrackedTask<R, E>
     where
         R: Send + 'static,
         E: Send + 'static;
@@ -60,28 +62,27 @@ impl ExecutorService for TokioExecutorService {
     where
         Self: 'a;
 
-    /// Accepts a callable and runs it through Tokio.
+    /// Accepts a runnable and runs it through Tokio.
     ///
     /// # Parameters
     ///
-    /// * `task` - Callable to execute on Tokio's blocking task pool.
+    /// * `task` - Runnable to execute on Tokio's blocking task pool.
     ///
     /// # Returns
     ///
-    /// A [`TokioTaskHandle`] for the accepted task.
+    /// `Ok(())` if the task was accepted.
     ///
     /// # Errors
     ///
     /// Returns [`RejectedExecution::Shutdown`] if shutdown has already been
     /// requested before the task is accepted.
-    fn submit_callable<C, R, E>(&self, task: C) -> Result<Self::Handle<R, E>, RejectedExecution>
+    fn submit<T, E>(&self, task: T) -> Result<(), RejectedExecution>
     where
-        C: Callable<R, E> + Send + 'static,
-        R: Send + 'static,
+        T: Runnable<E> + Send + 'static,
         E: Send + 'static,
     {
         let submission_guard = self.state.lock_submission();
-        if self.state.shutdown.load() {
+        if self.state.is_not_running() {
             return Err(RejectedExecution::Shutdown);
         }
         self.state.active_tasks.inc();
@@ -90,12 +91,104 @@ impl ExecutorService for TokioExecutorService {
         let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
         let handle = tokio::task::spawn_blocking(move || {
             let _guard = guard;
-            TaskRunner::new(task).call()
+            let mut task = task;
+            let runner = TaskRunner::new(move || task.run());
+            let _ = runner.call::<(), E>();
         });
         self.state
-            .register_abort_handle(marker, handle.abort_handle());
+            .register_abort_handle(marker, handle.abort_handle(), || {});
         drop(submission_guard);
-        Ok(TokioTaskHandle::new(handle))
+        Ok(())
+    }
+
+    /// Accepts a callable and runs it through Tokio.
+    ///
+    /// # Parameters
+    ///
+    /// * `task` - Callable to execute on Tokio's blocking task pool.
+    ///
+    /// # Returns
+    ///
+    /// A [`TaskHandle`] for the accepted task.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RejectedExecution::Shutdown`] if shutdown has already been
+    /// requested before the task is accepted.
+    fn submit_callable<C, R, E>(
+        &self,
+        task: C,
+    ) -> Result<Self::ResultHandle<R, E>, RejectedExecution>
+    where
+        C: Callable<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: Send + 'static,
+    {
+        let submission_guard = self.state.lock_submission();
+        if self.state.is_not_running() {
+            return Err(RejectedExecution::Shutdown);
+        }
+        self.state.active_tasks.inc();
+
+        let (handle, completion) = TaskCompletionPair::new().into_parts();
+        let abort_completion = completion.clone();
+        let marker = Arc::new(());
+        let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+        let join_handle = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            TaskRunner::new(task).run(completion);
+        });
+        self.state
+            .register_abort_handle(marker, join_handle.abort_handle(), move || {
+                let _ = abort_completion.cancel();
+            });
+        drop(submission_guard);
+        Ok(handle)
+    }
+
+    /// Accepts a callable and returns an actively tracked handle.
+    ///
+    /// # Parameters
+    ///
+    /// * `task` - Callable to execute on Tokio's blocking task pool.
+    ///
+    /// # Returns
+    ///
+    /// A [`TrackedTask`] for the accepted task.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RejectedExecution::Shutdown`] if shutdown has already been
+    /// requested before the task is accepted.
+    fn submit_tracked_callable<C, R, E>(
+        &self,
+        task: C,
+    ) -> Result<Self::TrackedHandle<R, E>, RejectedExecution>
+    where
+        C: Callable<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: Send + 'static,
+    {
+        let submission_guard = self.state.lock_submission();
+        if self.state.is_not_running() {
+            return Err(RejectedExecution::Shutdown);
+        }
+        self.state.active_tasks.inc();
+
+        let (handle, completion) = TaskCompletionPair::new().into_tracked_parts();
+        let abort_completion = completion.clone();
+        let marker = Arc::new(());
+        let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+        let join_handle = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            TaskRunner::new(task).run(completion);
+        });
+        self.state
+            .register_abort_handle(marker, join_handle.abort_handle(), move || {
+                let _ = abort_completion.cancel();
+            });
+        drop(submission_guard);
+        Ok(handle)
     }
 
     /// Stops accepting new tasks.
@@ -104,7 +197,7 @@ impl ExecutorService for TokioExecutorService {
     /// before their blocking closure starts.
     fn shutdown(&self) {
         let _guard = self.state.lock_submission();
-        self.state.shutdown.store(true);
+        self.state.shutdown();
         self.state.notify_if_terminated();
     }
 
@@ -117,23 +210,28 @@ impl ExecutorService for TokioExecutorService {
     ///
     /// A report with zero queued tasks, the observed active task count, and
     /// the number of Tokio abort handles signalled.
-    fn shutdown_now(&self) -> ShutdownReport {
+    fn stop(&self) -> StopReport {
         let _guard = self.state.lock_submission();
-        self.state.shutdown.store(true);
+        self.state.stop();
         let running = self.state.active_tasks.get();
         let cancellation_count = self.state.abort_tracked_tasks();
         self.state.notify_if_terminated();
-        ShutdownReport::new(0, running, cancellation_count)
+        StopReport::new(0, running, cancellation_count)
+    }
+
+    /// Returns the current lifecycle state.
+    fn lifecycle(&self) -> ExecutorServiceLifecycle {
+        self.state.lifecycle()
     }
 
     /// Returns whether shutdown has been requested.
-    fn is_shutdown(&self) -> bool {
-        self.state.shutdown.load()
+    fn is_not_running(&self) -> bool {
+        self.state.is_not_running()
     }
 
     /// Returns whether shutdown was requested and all tasks are finished.
     fn is_terminated(&self) -> bool {
-        self.is_shutdown() && self.state.active_tasks.is_zero()
+        self.lifecycle() == ExecutorServiceLifecycle::Terminated
     }
 
     /// Waits until the service has terminated.

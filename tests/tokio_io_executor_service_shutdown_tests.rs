@@ -24,7 +24,7 @@ async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
         result,
         Err(qubit_tokio_executor::service::RejectedExecution::Shutdown)
     ));
-    assert!(service.is_shutdown());
+    assert!(service.is_not_running());
     assert!(service.is_terminated());
 }
 
@@ -43,12 +43,12 @@ async fn test_tokio_io_executor_service_await_termination_waits_for_tasks() {
     service.await_termination().await;
 
     handle.await.expect("task should complete successfully");
-    assert!(service.is_shutdown());
+    assert!(service.is_not_running());
     assert!(service.is_terminated());
 }
 
 #[tokio::test]
-async fn test_tokio_io_executor_service_shutdown_now_aborts_running_task_handle() {
+async fn test_tokio_io_executor_service_stop_aborts_running_task_handle() {
     let service = TokioIoExecutorService::new();
 
     let handle = service
@@ -59,17 +59,17 @@ async fn test_tokio_io_executor_service_shutdown_now_aborts_running_task_handle(
         .expect("service should accept task");
 
     tokio::task::yield_now().await;
-    let report = service.shutdown_now();
+    let report = service.stop();
     service.await_termination().await;
 
     assert!(report.cancelled >= 1);
-    assert!(service.is_shutdown());
+    assert!(service.is_not_running());
     assert!(service.is_terminated());
     assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
 }
 
 #[tokio::test]
-async fn test_tokio_io_executor_service_shutdown_now_ignores_completed_tasks() {
+async fn test_tokio_io_executor_service_stop_ignores_completed_tasks() {
     let service = TokioIoExecutorService::new();
 
     service
@@ -78,12 +78,12 @@ async fn test_tokio_io_executor_service_shutdown_now_ignores_completed_tasks() {
         .await
         .expect("task should complete successfully");
 
-    let report = service.shutdown_now();
+    let report = service.stop();
     service.await_termination().await;
 
     assert_eq!(report.running, 0);
     assert_eq!(report.cancelled, 0);
-    assert!(service.is_shutdown());
+    assert!(service.is_not_running());
     assert!(service.is_terminated());
 }
 

@@ -10,16 +10,10 @@
 use std::{
     future::Future,
     pin::Pin,
-    task::{
-        Context,
-        Poll,
-    },
+    task::{Context, Poll},
 };
 
-use tokio::task::{
-    JoinError,
-    JoinHandle,
-};
+use tokio::task::{JoinError, JoinHandle};
 
 /// Future-backed execution returned by [`TokioExecutor`](super::TokioExecutor).
 ///

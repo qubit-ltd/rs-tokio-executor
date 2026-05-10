@@ -7,20 +7,13 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::sync::{
-    Arc,
-    Mutex,
-    MutexGuard,
-};
+use std::sync::{Arc, Mutex, MutexGuard, atomic::AtomicU8};
 
-use qubit_atomic::{
-    Atomic,
-    AtomicCount,
-};
-use tokio::{
-    sync::Notify,
-    task::AbortHandle,
-};
+use qubit_atomic::AtomicCount;
+use qubit_executor::service::ExecutorServiceLifecycle;
+use tokio::{sync::Notify, task::AbortHandle};
+
+use crate::executor_service_lifecycle_bits;
 
 /// Abort handle tracked with a service-local task marker.
 struct TrackedAbortHandle {
@@ -28,13 +21,15 @@ struct TrackedAbortHandle {
     marker: Arc<()>,
     /// Tokio abort handle used by immediate shutdown.
     handle: AbortHandle,
+    /// Completion hook used to publish cancellation for result handles.
+    cancel: Box<dyn FnOnce() + Send + 'static>,
 }
 
 /// Shared state for [`crate::TokioExecutorService`].
 #[derive(Default)]
 pub(crate) struct TokioExecutorServiceState {
-    /// Whether shutdown has been requested.
-    pub(crate) shutdown: Atomic<bool>,
+    /// Stored lifecycle state before derived termination.
+    lifecycle: AtomicU8,
     /// Number of accepted Tokio tasks that have not finished or been aborted.
     pub(crate) active_tasks: AtomicCount,
     /// Serializes task submission and shutdown transitions.
@@ -67,10 +62,17 @@ impl TokioExecutorServiceState {
     ///
     /// * `marker` - Service-local task marker shared with the lifecycle guard.
     /// * `handle` - Tokio abort handle for the accepted task.
-    pub(crate) fn register_abort_handle(&self, marker: Arc<()>, handle: AbortHandle) {
+    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
         let mut handles = self.lock_abort_handles();
         if !handle.is_finished() {
-            handles.push(TrackedAbortHandle { marker, handle });
+            handles.push(TrackedAbortHandle {
+                marker,
+                handle,
+                cancel: Box::new(cancel),
+            });
         }
     }
 
@@ -95,6 +97,7 @@ impl TokioExecutorServiceState {
         for tracked in handles.drain(..) {
             if !tracked.handle.is_finished() {
                 tracked.handle.abort();
+                (tracked.cancel)();
                 cancellation_count += 1;
             }
         }
@@ -103,7 +106,7 @@ impl TokioExecutorServiceState {
 
     /// Wakes termination waiters when shutdown and task completion allow it.
     pub(crate) fn notify_if_terminated(&self) {
-        if self.shutdown.load() && self.active_tasks.is_zero() {
+        if self.is_not_running() && self.active_tasks.is_zero() {
             self.terminated_notify.notify_waiters();
         }
     }
@@ -117,5 +120,30 @@ impl TokioExecutorServiceState {
         self.abort_handles
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Returns the observed lifecycle state.
+    pub(crate) fn lifecycle(&self) -> ExecutorServiceLifecycle {
+        let lifecycle = executor_service_lifecycle_bits::load(&self.lifecycle);
+        if lifecycle != ExecutorServiceLifecycle::Running && self.active_tasks.is_zero() {
+            ExecutorServiceLifecycle::Terminated
+        } else {
+            lifecycle
+        }
+    }
+
+    /// Returns whether shutdown or stop has been requested.
+    pub(crate) fn is_not_running(&self) -> bool {
+        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
+    }
+
+    /// Marks the service as shutting down.
+    pub(crate) fn shutdown(&self) {
+        executor_service_lifecycle_bits::shutdown(&self.lifecycle);
+    }
+
+    /// Marks the service as stopping.
+    pub(crate) fn stop(&self) {
+        executor_service_lifecycle_bits::stop(&self.lifecycle);
     }
 }

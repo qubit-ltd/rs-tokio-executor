@@ -9,8 +9,7 @@
  ******************************************************************************/
 use std::io;
 
-use qubit_executor::TaskExecutionError;
-use qubit_executor::service::ExecutorService;
+use qubit_executor::{TaskExecutionError, service::ExecutorService};
 use qubit_tokio_executor::TokioExecutorService;
 
 fn ok_unit_task() -> Result<(), io::Error> {
@@ -27,12 +26,10 @@ async fn test_tokio_executor_service_submit_acceptance_is_not_task_success() {
 
     service
         .submit(ok_unit_task as fn() -> Result<(), io::Error>)
-        .expect("service should accept the shared runnable")
-        .await
-        .expect("shared runnable should complete successfully");
+        .expect("service should accept the shared runnable");
 
     let handle = service
-        .submit(|| Err::<(), _>(io::Error::other("task failed")))
+        .submit_tracked(|| Err::<(), _>(io::Error::other("task failed")))
         .expect("service should accept the runnable");
 
     let err = handle

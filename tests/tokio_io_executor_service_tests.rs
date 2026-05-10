@@ -1,7 +1,4 @@
-use qubit_tokio_executor::{
-    RejectedExecution,
-    TokioIoExecutorService,
-};
+use qubit_tokio_executor::{RejectedExecution, TokioIoExecutorService};
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown() {

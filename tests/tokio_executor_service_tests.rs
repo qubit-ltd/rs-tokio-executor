@@ -1,10 +1,6 @@
 use std::io;
 
-use qubit_tokio_executor::{
-    ExecutorService,
-    RejectedExecution,
-    TokioExecutorService,
-};
+use qubit_tokio_executor::{ExecutorService, RejectedExecution, TokioExecutorService};
 
 #[tokio::test]
 async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown() {
