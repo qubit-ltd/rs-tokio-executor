@@ -7,14 +7,10 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::{
-    io,
-    sync::mpsc,
-    time::Duration,
-};
+use std::{io, sync::mpsc, time::Duration};
 
-use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorService;
+use qubit_executor::{CancelResult, TaskExecutionError};
 use qubit_tokio_executor::TokioExecutorService;
 
 #[test]
@@ -42,10 +38,10 @@ fn test_tokio_task_handle_cancel_requests_abort_for_queued_task() {
 
         let service = TokioExecutorService::new();
         let handle = service
-            .submit(|| Ok::<(), io::Error>(()))
+            .submit_tracked(|| Ok::<(), io::Error>(()))
             .expect("service should accept queued task");
 
-        assert!(handle.cancel());
+        assert_eq!(CancelResult::Cancelled, handle.cancel());
         release_tx
             .send(())
             .expect("blocking task should receive release signal");
@@ -70,7 +66,7 @@ async fn test_tokio_task_handle_reports_panicked_task() {
     let service = TokioExecutorService::new();
 
     let handle = service
-        .submit(|| -> Result<(), io::Error> { panic!("tokio service panic") })
+        .submit_tracked(|| -> Result<(), io::Error> { panic!("tokio service panic") })
         .expect("service should accept panicking task");
 
     assert!(matches!(handle.await, Err(TaskExecutionError::Panicked)));
@@ -83,7 +79,7 @@ async fn test_tokio_task_handle_panicked_is_not_cancelled() {
     let service = TokioExecutorService::new();
 
     let handle = service
-        .submit(|| -> Result<(), io::Error> { panic!("tokio service panic") })
+        .submit_tracked(|| -> Result<(), io::Error> { panic!("tokio service panic") })
         .expect("service should accept panicking task");
 
     let error = handle

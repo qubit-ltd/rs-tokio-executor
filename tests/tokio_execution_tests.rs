@@ -1,9 +1,6 @@
 use std::io;
 
-use qubit_tokio_executor::{
-    Executor,
-    TokioExecutor,
-};
+use qubit_tokio_executor::{Executor, TokioExecutor};
 
 #[tokio::test]
 async fn test_tokio_execution_reports_finished_and_yields_result() {

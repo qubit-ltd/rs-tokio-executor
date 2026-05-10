@@ -7,21 +7,14 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use qubit_executor::TaskExecutionError;
 
 use crate::TokioTaskHandle;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
-use qubit_executor::service::{
-    RejectedExecution,
-    ShutdownReport,
-};
+use qubit_executor::service::{ExecutorServiceLifecycle, RejectedExecution, StopReport};
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///
@@ -65,7 +58,7 @@ impl TokioIoExecutorService {
         E: Send + 'static,
     {
         let submission_guard = self.state.lock_submission();
-        if self.state.shutdown.load() {
+        if self.state.is_not_running() {
             return Err(RejectedExecution::Shutdown);
         }
         self.state.active_tasks.inc();
@@ -85,10 +78,10 @@ impl TokioIoExecutorService {
     /// Stops accepting new async tasks.
     ///
     /// Already accepted tasks are allowed to finish unless aborted through
-    /// their handles or by [`Self::shutdown_now`].
+    /// their handles or by [`Self::stop`].
     pub fn shutdown(&self) {
         let _guard = self.state.lock_submission();
-        self.state.shutdown.store(true);
+        self.state.shutdown();
         self.state.notify_if_terminated();
     }
 
@@ -98,13 +91,55 @@ impl TokioIoExecutorService {
     ///
     /// A report with zero queued tasks, the observed active-task count, and
     /// the number of Tokio abort handles signalled.
-    pub fn shutdown_now(&self) -> ShutdownReport {
+    pub fn stop(&self) -> StopReport {
         let _guard = self.state.lock_submission();
-        self.state.shutdown.store(true);
+        self.state.stop();
         let running = self.state.active_tasks.get();
         let cancellation_count = self.state.abort_tracked_tasks();
         self.state.notify_if_terminated();
-        ShutdownReport::new(0, running, cancellation_count)
+        StopReport::new(0, running, cancellation_count)
+    }
+
+    /// Returns the current lifecycle state.
+    ///
+    /// # Returns
+    ///
+    /// [`ExecutorServiceLifecycle::Terminated`] after shutdown or stop and
+    /// once no accepted async task remains active.
+    #[inline]
+    pub fn lifecycle(&self) -> ExecutorServiceLifecycle {
+        self.state.lifecycle()
+    }
+
+    /// Returns whether this service still accepts async tasks.
+    ///
+    /// # Returns
+    ///
+    /// `true` only while the lifecycle is [`ExecutorServiceLifecycle::Running`].
+    #[inline]
+    pub fn is_running(&self) -> bool {
+        self.lifecycle() == ExecutorServiceLifecycle::Running
+    }
+
+    /// Returns whether graceful shutdown is in progress.
+    ///
+    /// # Returns
+    ///
+    /// `true` only while the lifecycle is
+    /// [`ExecutorServiceLifecycle::ShuttingDown`].
+    #[inline]
+    pub fn is_shutting_down(&self) -> bool {
+        self.lifecycle() == ExecutorServiceLifecycle::ShuttingDown
+    }
+
+    /// Returns whether abrupt stop is in progress.
+    ///
+    /// # Returns
+    ///
+    /// `true` only while the lifecycle is [`ExecutorServiceLifecycle::Stopping`].
+    #[inline]
+    pub fn is_stopping(&self) -> bool {
+        self.lifecycle() == ExecutorServiceLifecycle::Stopping
     }
 
     /// Returns whether shutdown has been requested.
@@ -113,8 +148,8 @@ impl TokioIoExecutorService {
     ///
     /// `true` if this service no longer accepts new async tasks.
     #[inline]
-    pub fn is_shutdown(&self) -> bool {
-        self.state.shutdown.load()
+    pub fn is_not_running(&self) -> bool {
+        self.state.is_not_running()
     }
 
     /// Returns whether shutdown was requested and all async tasks are finished.
@@ -125,7 +160,7 @@ impl TokioIoExecutorService {
     /// tasks remain active.
     #[inline]
     pub fn is_terminated(&self) -> bool {
-        self.is_shutdown() && self.state.active_tasks.is_zero()
+        self.lifecycle() == ExecutorServiceLifecycle::Terminated
     }
 
     /// Waits until the service has terminated.

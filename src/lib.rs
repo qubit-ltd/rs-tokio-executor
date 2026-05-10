@@ -12,6 +12,7 @@
 //! Tokio-backed executor and executor service implementations.
 //!
 
+mod executor_service_lifecycle_bits;
 mod tokio_execution;
 mod tokio_executor;
 mod tokio_executor_service;
@@ -22,33 +23,26 @@ mod tokio_io_service_task_guard;
 mod tokio_service_task_guard;
 mod tokio_task_handle;
 
-pub use qubit_executor::executor::{
-    Executor,
-    FutureExecutor,
-};
+pub use qubit_executor::executor::{Executor, FutureExecutor};
 pub use qubit_executor::service::{
-    ExecutorService,
-    RejectedExecution,
-    ShutdownReport,
+    ExecutorService, ExecutorServiceLifecycle, RejectedExecution, StopReport,
+};
+pub use qubit_executor::{
+    CancelResult, TaskHandle, TaskResult, TaskResultHandle, TaskStatus, TrackedTask,
+    TrackedTaskHandle, TryGet,
 };
 pub use tokio_execution::TokioExecution;
 pub use tokio_executor::TokioExecutor;
-pub use tokio_executor_service::{
-    TokioBlockingExecutorService,
-    TokioExecutorService,
-};
+pub use tokio_executor_service::{TokioBlockingExecutorService, TokioExecutorService};
 pub use tokio_io_executor_service::TokioIoExecutorService;
 pub use tokio_task_handle::TokioTaskHandle;
 
 /// Executor service compatibility exports for Tokio-backed users.
 pub mod service {
     pub use crate::{
-        ExecutorService,
-        RejectedExecution,
-        ShutdownReport,
-        TokioBlockingExecutorService,
-        TokioExecutorService,
-        TokioIoExecutorService,
-        TokioTaskHandle,
+        CancelResult, ExecutorService, ExecutorServiceLifecycle, RejectedExecution, StopReport,
+        TaskHandle, TaskResult, TaskResultHandle, TaskStatus, TokioBlockingExecutorService,
+        TokioExecutorService, TokioIoExecutorService, TokioTaskHandle, TrackedTask,
+        TrackedTaskHandle, TryGet,
     };
 }

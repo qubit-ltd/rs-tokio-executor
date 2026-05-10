@@ -10,21 +10,12 @@
 use std::{
     future::Future,
     pin::Pin,
-    task::{
-        Context,
-        Poll,
-    },
+    task::{Context, Poll},
 };
 
-use tokio::task::{
-    JoinError,
-    JoinHandle,
-};
+use tokio::task::{JoinError, JoinHandle};
 
-use qubit_executor::{
-    TaskExecutionError,
-    TaskResult,
-};
+use qubit_executor::{TaskExecutionError, TaskResult};
 
 /// Async handle returned by Tokio-backed executor services.
 ///

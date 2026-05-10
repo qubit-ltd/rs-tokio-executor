@@ -11,10 +11,7 @@
 
 use std::io;
 
-use qubit_tokio_executor::service::{
-    ExecutorService,
-    TokioBlockingExecutorService,
-};
+use qubit_tokio_executor::service::{ExecutorService, TokioBlockingExecutorService};
 
 #[tokio::test]
 async fn test_tokio_blocking_executor_service_alias_runs_blocking_callable() {

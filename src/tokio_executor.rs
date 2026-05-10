@@ -10,10 +10,7 @@
 use qubit_function::Callable;
 
 use crate::TokioExecution;
-use qubit_executor::executor::{
-    Executor,
-    FutureExecutor,
-};
+use qubit_executor::executor::{Executor, FutureExecutor};
 
 /// Executes callable tasks on Tokio's blocking task pool.
 ///

@@ -28,7 +28,7 @@ application.
 - `TokioIoExecutorService` for async `Future` work backed by `tokio::spawn`.
 - `TokioTaskHandle` for awaiting, cancellation, completion checks, and task-result reporting.
 - `TokioExecution` as the execution carrier used by Tokio-backed executor APIs.
-- Shared `ExecutorService`, `RejectedExecution`, and `ShutdownReport` re-exports for convenient imports.
+- Shared `ExecutorService`, `RejectedExecution`, and `StopReport` re-exports for convenient imports.
 
 ## Runtime Requirement
 
@@ -58,9 +58,11 @@ the future body.
 ## Shutdown and Cancellation
 
 A successful `submit` or `spawn` means only that the service accepted the task.
-The task result is reported through `TokioTaskHandle`.
+Blocking callable submissions report results through the shared `TaskHandle`;
+tracked blocking submissions return `TrackedTask`. Async IO submissions still
+use `TokioTaskHandle` because they wrap Tokio `JoinHandle`s directly.
 
-`shutdown` rejects new tasks and lets accepted tasks finish. `shutdown_now`
+`shutdown` rejects new tasks and lets accepted tasks finish. `stop`
 rejects new tasks and requests cancellation or abort for tracked Tokio tasks.
 Async IO tasks are aborted through Tokio abort handles. Blocking tasks submitted
 through Tokio can be cancelled only before they start; already running blocking

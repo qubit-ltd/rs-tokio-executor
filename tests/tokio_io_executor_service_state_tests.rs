@@ -12,12 +12,12 @@ async fn test_tokio_io_executor_service_state_tracks_abort_and_termination() {
         })
         .unwrap();
 
-    let report = service.shutdown_now();
+    let report = service.stop();
     service.await_termination().await;
 
     assert!(report.running >= 1);
     assert!(report.cancelled >= 1);
-    assert!(service.is_shutdown());
+    assert!(service.is_not_running());
     assert!(service.is_terminated());
     assert!(handle.await.is_err());
 }

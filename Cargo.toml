@@ -1,6 +1,6 @@
 [package]
 name = "qubit-tokio-executor"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Haixing Hu <starfish.hu@gmail.com>"]
@@ -30,8 +30,8 @@ doctest = true
 tokio = { version = "1.52", features = ["rt", "sync"] }
 
 qubit-atomic = "0.10"
-qubit-function = "0.12"
-qubit-executor = "0.1"
+qubit-function = "0.13"
+qubit-executor = { path = "../rs-executor" }
 
 [dev-dependencies]
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
