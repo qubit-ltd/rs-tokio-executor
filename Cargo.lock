@@ -39,6 +39,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "log"
+version = "0.4.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
 name = "oneshot"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -108,10 +114,11 @@ dependencies = [
 name = "qubit-executor"
 version = "0.2.0"
 dependencies = [
+ "log",
  "oneshot",
+ "parking_lot",
  "qubit-atomic",
  "qubit-function",
- "qubit-lock",
  "thiserror",
 ]
 
@@ -123,16 +130,6 @@ checksum = "68fdce1e55a6889c95c94e174616614f40eaaacac9969fe5b3fd841f79468df0"
 dependencies = [
  "parking_lot",
  "pastey",
-]
-
-[[package]]
-name = "qubit-lock"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2f0eac9b079bace6c7b11fc76e2ee44bcebc900424eb8307d55a1a9db98b9c0"
-dependencies = [
- "parking_lot",
- "tokio",
 ]
 
 [[package]]

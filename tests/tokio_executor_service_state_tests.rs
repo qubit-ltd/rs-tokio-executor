@@ -1,6 +1,13 @@
-use std::{io, sync::mpsc, time::Duration};
+use std::{
+    io,
+    sync::mpsc,
+    time::Duration,
+};
 
-use qubit_tokio_executor::{ExecutorService, TokioExecutorService};
+use qubit_tokio_executor::{
+    ExecutorService,
+    TokioExecutorService,
+};
 
 #[tokio::test]
 async fn test_tokio_executor_service_state_tracks_shutdown_and_active_tasks() {
@@ -21,6 +28,6 @@ async fn test_tokio_executor_service_state_tracks_shutdown_and_active_tasks() {
     assert!(!service.is_terminated());
     release_tx.send(()).unwrap();
     handle.await.unwrap();
-    service.await_termination().await;
+    service.wait_termination();
     assert!(service.is_terminated());
 }

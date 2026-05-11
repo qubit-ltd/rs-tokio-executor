@@ -10,10 +10,16 @@
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{
+        Context,
+        Poll,
+    },
 };
 
-use tokio::task::{JoinError, JoinHandle};
+use tokio::task::{
+    JoinError,
+    JoinHandle,
+};
 
 /// Future-backed execution returned by [`TokioExecutor`](super::TokioExecutor).
 ///
@@ -47,7 +53,7 @@ impl<R, E> TokioExecution<R, E> {
     ///
     /// A future-backed execution wrapper.
     #[inline]
-    pub(crate) fn new(handle: JoinHandle<Result<R, E>>) -> Self {
+    pub fn new(handle: JoinHandle<Result<R, E>>) -> Self {
         Self { handle }
     }
 
@@ -121,8 +127,8 @@ impl<R, E> Future for TokioExecution<R, E> {
 /// Resumes the task panic when Tokio reports a panic, or panics with a
 /// cancellation message when the task was cancelled.
 fn handle_join_error<R, E>(error: JoinError) -> Poll<Result<R, E>> {
-    if error.is_panic() {
-        std::panic::resume_unwind(error.into_panic());
-    }
-    panic!("tokio execution was cancelled before completion");
+    let payload = error
+        .try_into_panic()
+        .unwrap_or_else(|_| Box::new("tokio execution was cancelled before completion"));
+    std::panic::resume_unwind(payload);
 }
