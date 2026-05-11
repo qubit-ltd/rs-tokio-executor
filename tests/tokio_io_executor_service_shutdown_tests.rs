@@ -22,7 +22,7 @@ async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
 
     assert!(matches!(
         result,
-        Err(qubit_tokio_executor::service::RejectedExecution::Shutdown)
+        Err(qubit_tokio_executor::service::SubmissionError::Shutdown)
     ));
     assert!(service.is_not_running());
     assert!(service.is_terminated());
@@ -85,6 +85,31 @@ async fn test_tokio_io_executor_service_stop_ignores_completed_tasks() {
     assert_eq!(report.cancelled, 0);
     assert!(service.is_not_running());
     assert!(service.is_terminated());
+}
+
+#[tokio::test]
+async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
+    let service = TokioIoExecutorService::new();
+    let (release_tx, release_rx) = oneshot::channel::<()>();
+
+    let handle = service
+        .spawn(async move {
+            release_rx.await.expect("release signal should arrive");
+            Ok::<(), io::Error>(())
+        })
+        .expect("service should accept future");
+    tokio::task::yield_now().await;
+
+    let report = service.stop();
+
+    assert!(report.running >= 1);
+    assert!(service.is_stopping() || service.is_terminated());
+    drop(release_tx);
+    assert!(matches!(
+        handle.await,
+        Err(TaskExecutionError::Cancelled) | Err(TaskExecutionError::Panicked) | Ok(())
+    ));
+    service.await_termination().await;
 }
 
 #[tokio::test]

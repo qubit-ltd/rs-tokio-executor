@@ -9,17 +9,20 @@
  ******************************************************************************/
 use qubit_function::Callable;
 
-use crate::TokioExecution;
-use qubit_executor::executor::{Executor, FutureExecutor};
+use qubit_executor::{
+    TrackedTask,
+    executor::Executor,
+    service::SubmissionError,
+    task::spi::{
+        TaskEndpointPair,
+        TaskRunner,
+    },
+};
 
 /// Executes callable tasks on Tokio's blocking task pool.
 ///
-/// `TokioExecutor` is a [`FutureExecutor`]: its [`Executor::call`] and
-/// [`Executor::execute`] methods return a [`TokioExecution`] value that
-/// **implements [`Future`]** with
-/// [`Output`](std::future::Future::Output) `= Result<R, E>`. You
-/// obtain the callable's result by **`.await`ing** (or polling) that future; it
-/// is **not** a resolved [`Result`] at return time.
+/// `TokioExecutor` implements [`Executor`] by submitting work to Tokio's
+/// blocking task pool and returning the standard tracked task handle.
 ///
 /// # Semantics
 ///
@@ -35,17 +38,18 @@ use qubit_executor::executor::{Executor, FutureExecutor};
 ///   [`Builder::new_current_thread`](tokio::runtime::Builder::new_current_thread);
 ///   a multi-thread [`Runtime`](tokio::runtime::Runtime) or an async handler in
 ///   a server is fine, as long as `call` happens while that runtime is running.
-/// * **Await the returned future on Tokio** — the [`TokioExecution`] polls a
-///   [`JoinHandle`](tokio::task::JoinHandle); complete it with `.await` inside
-///   the same kind of Tokio-driven async context.
+/// * **Await the returned tracked task on Tokio** — the returned
+///   [`TrackedTask`] implements [`IntoFuture`](std::future::IntoFuture), so it
+///   can be awaited inside a Tokio-driven async context after submission
+///   succeeds.
 /// * **Blocking pool** — the closure runs on Tokio's *blocking* thread pool, not
 ///   on the core async worker threads, so heavy synchronous work does not
 ///   starve other async tasks on the runtime.
 /// * **Compared to
 ///   [`ThreadPerTaskExecutor`](qubit_executor::executor::ThreadPerTaskExecutor)** —
 ///   this type **reuses** Tokio-managed blocking threads (bounded pool) instead
-///   of one new [`std::thread`] per task, and you **await** the result instead
-///   of calling a blocking [`TaskHandle::get`](qubit_executor::TaskHandle::get).
+///   of one new [`std::thread`] per task, and can return a handle that is either
+///   awaited or read with blocking `get`.
 ///
 /// # Examples
 ///
@@ -67,7 +71,11 @@ use qubit_executor::executor::{Executor, FutureExecutor};
 ///     .build()?
 ///     .block_on(async {
 ///         let executor = TokioExecutor;
-///         let value = executor.call(|| Ok::<i32, io::Error>(40 + 2)).await?;
+///         let value = executor
+///             .call(|| Ok::<i32, io::Error>(40 + 2))
+///             .expect("executor should accept callable")
+///             .await
+///             .expect("callable should complete successfully");
 ///         assert_eq!(value, 42);
 ///         Ok::<(), io::Error>(())
 ///     })?;
@@ -78,12 +86,6 @@ use qubit_executor::executor::{Executor, FutureExecutor};
 pub struct TokioExecutor;
 
 impl Executor for TokioExecutor {
-    type Execution<R, E>
-        = TokioExecution<R, E>
-    where
-        R: Send + 'static,
-        E: std::fmt::Display + Send + 'static;
-
     /// Spawns the callable on Tokio's blocking task pool.
     ///
     /// This method invokes [`tokio::task::spawn_blocking`] **before** returning.
@@ -95,19 +97,19 @@ impl Executor for TokioExecutor {
     ///
     /// # Returns
     ///
-    /// A [`TokioExecution`] that implements [`Future`] with
-    /// [`Output`](std::future::Future::Output) `= Result<R, E>`. Await it to obtain the
-    /// callable's result.
-    fn call<C, R, E>(&self, mut task: C) -> Self::Execution<R, E>
+    /// A tracked task handle for the accepted callable.
+    fn call<C, R, E>(&self, task: C) -> Result<TrackedTask<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
-        E: std::fmt::Display + Send + 'static,
+        E: Send + 'static,
     {
         // `spawn_blocking` runs now and requires `Handle::current()` — caller must
         // already be inside a Tokio runtime (see struct-level documentation).
-        TokioExecution::new(tokio::task::spawn_blocking(move || task.call()))
+        let (handle, slot) = TaskEndpointPair::new().into_tracked_parts();
+        tokio::task::spawn_blocking(move || {
+            TaskRunner::new(task).run(slot);
+        });
+        Ok(handle)
     }
 }
-
-impl FutureExecutor for TokioExecutor {}

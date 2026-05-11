@@ -9,9 +9,20 @@
  ******************************************************************************/
 //! Tests for [`TokioExecutor`](qubit_tokio_executor::TokioExecutor).
 
-use std::{io, sync::mpsc, time::Duration};
+use std::{
+    io,
+    sync::mpsc,
+    time::Duration,
+};
 
-use qubit_tokio_executor::{Executor, TokioExecutor};
+use qubit_executor::{
+    CancelResult,
+    TaskExecutionError,
+};
+use qubit_tokio_executor::{
+    Executor,
+    TokioExecutor,
+};
 
 #[tokio::test]
 async fn test_tokio_executor_execute_returns_future_result() {
@@ -19,6 +30,7 @@ async fn test_tokio_executor_execute_returns_future_result() {
 
     executor
         .execute(|| Ok::<(), io::Error>(()))
+        .expect("tokio executor should accept runnable")
         .await
         .expect("tokio executor should run runnable successfully");
 }
@@ -29,6 +41,7 @@ async fn test_tokio_executor_call_returns_future_value() {
 
     let value = executor
         .call(|| Ok::<usize, io::Error>(42))
+        .expect("tokio executor should accept callable")
         .await
         .expect("tokio executor should return callable value");
 
@@ -39,22 +52,22 @@ async fn test_tokio_executor_call_returns_future_value() {
 async fn test_tokio_execution_is_finished_reports_completion() {
     let executor = TokioExecutor;
 
-    let mut execution = executor.call(|| {
-        std::thread::sleep(Duration::from_millis(25));
-        Ok::<usize, io::Error>(42)
-    });
+    let execution = executor
+        .call(|| {
+            std::thread::sleep(Duration::from_millis(25));
+            Ok::<usize, io::Error>(42)
+        })
+        .expect("tokio executor should accept callable");
 
-    assert!(!execution.is_finished());
+    assert!(!execution.is_done());
     assert_eq!(
-        (&mut execution)
-            .await
-            .expect("tokio execution should complete"),
+        execution.await.expect("tokio execution should complete"),
         42,
     );
 }
 
 #[test]
-fn test_tokio_execution_cancel_queued_blocking_task_panics_when_awaited() {
+fn test_tokio_execution_cancel_queued_blocking_task_reports_cancelled() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .max_blocking_threads(1)
         .enable_all()
@@ -77,30 +90,32 @@ fn test_tokio_execution_cancel_queued_blocking_task_panics_when_awaited() {
             .expect("blocking slot should be occupied");
 
         let executor = TokioExecutor;
-        let execution = executor.call(|| Ok::<(), io::Error>(()));
+        let execution = executor
+            .call(|| Ok::<(), io::Error>(()))
+            .expect("tokio executor should accept callable");
 
-        assert!(execution.cancel());
+        assert_eq!(execution.cancel(), CancelResult::Cancelled);
         release_tx
             .send(())
             .expect("blocking task should receive release signal");
         blocker.await.expect("blocking slot task should finish");
 
-        let waiter = tokio::spawn(execution);
-        let error = tokio::time::timeout(Duration::from_secs(1), waiter)
+        let result = tokio::time::timeout(Duration::from_secs(1), execution)
             .await
             .expect("cancelled execution should complete promptly")
-            .expect_err("cancelled execution should panic when awaited");
-        assert!(error.is_panic());
+            .expect_err("cancelled execution should report cancellation");
+        assert!(matches!(result, TaskExecutionError::Cancelled));
     });
 }
 
 #[tokio::test]
-#[should_panic(expected = "tokio executor panic")]
-async fn test_tokio_execution_resumes_task_panic() {
+async fn test_tokio_execution_reports_task_panic() {
     let executor = TokioExecutor;
 
-    executor
+    let result = executor
         .call(|| -> Result<(), io::Error> { panic!("tokio executor panic") })
+        .expect("tokio executor should accept callable")
         .await
-        .expect("panic should be resumed before this result is observed");
+        .expect_err("panic should be converted into task execution error");
+    assert!(matches!(result, TaskExecutionError::Panicked));
 }

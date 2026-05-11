@@ -7,14 +7,22 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+};
 
 use qubit_executor::TaskExecutionError;
 
 use crate::TokioTaskHandle;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
-use qubit_executor::service::{ExecutorServiceLifecycle, RejectedExecution, StopReport};
+use qubit_executor::service::{
+    ExecutorServiceLifecycle,
+    StopReport,
+    SubmissionError,
+};
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///
@@ -49,9 +57,9 @@ impl TokioIoExecutorService {
     ///
     /// # Errors
     ///
-    /// Returns [`RejectedExecution::Shutdown`] if shutdown has already been
+    /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
     /// requested before the task is accepted.
-    pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, RejectedExecution>
+    pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
         R: Send + 'static,
@@ -59,7 +67,7 @@ impl TokioIoExecutorService {
     {
         let submission_guard = self.state.lock_submission();
         if self.state.is_not_running() {
-            return Err(RejectedExecution::Shutdown);
+            return Err(SubmissionError::Shutdown);
         }
         self.state.active_tasks.inc();
 

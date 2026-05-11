@@ -7,7 +7,10 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{
+    AtomicU8,
+    Ordering,
+};
 
 use qubit_executor::service::ExecutorServiceLifecycle;
 
@@ -30,10 +33,11 @@ pub(crate) fn stop(lifecycle: &AtomicU8) {
 }
 
 fn from_u8(value: u8) -> ExecutorServiceLifecycle {
-    match value {
-        0 => ExecutorServiceLifecycle::Running,
-        1 => ExecutorServiceLifecycle::ShuttingDown,
-        2 => ExecutorServiceLifecycle::Stopping,
-        _ => ExecutorServiceLifecycle::Terminated,
-    }
+    const STATES: [ExecutorServiceLifecycle; 4] = [
+        ExecutorServiceLifecycle::Running,
+        ExecutorServiceLifecycle::ShuttingDown,
+        ExecutorServiceLifecycle::Stopping,
+        ExecutorServiceLifecycle::Terminated,
+    ];
+    STATES[usize::from(value.min(ExecutorServiceLifecycle::Terminated as u8))]
 }

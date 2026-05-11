@@ -7,16 +7,33 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    thread,
+    time::Duration,
+};
 
-use qubit_function::{Callable, Runnable};
+use qubit_function::{
+    Callable,
+    Runnable,
+};
 
-use qubit_executor::{TaskCompletionPair, TaskHandle, TaskRunner, TrackedTask};
+use qubit_executor::{
+    TaskHandle,
+    TrackedTask,
+    task::spi::{
+        TaskEndpointPair,
+        TaskRunner,
+    },
+};
 
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
 use qubit_executor::service::{
-    ExecutorService, ExecutorServiceLifecycle, RejectedExecution, StopReport,
+    ExecutorService,
+    ExecutorServiceLifecycle,
+    StopReport,
+    SubmissionError,
 };
 
 /// Tokio-backed service for submitted blocking tasks.
@@ -57,11 +74,6 @@ impl ExecutorService for TokioExecutorService {
         R: Send + 'static,
         E: Send + 'static;
 
-    type Termination<'a>
-        = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>
-    where
-        Self: 'a;
-
     /// Accepts a runnable and runs it through Tokio.
     ///
     /// # Parameters
@@ -74,16 +86,16 @@ impl ExecutorService for TokioExecutorService {
     ///
     /// # Errors
     ///
-    /// Returns [`RejectedExecution::Shutdown`] if shutdown has already been
+    /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
     /// requested before the task is accepted.
-    fn submit<T, E>(&self, task: T) -> Result<(), RejectedExecution>
+    fn submit<T, E>(&self, task: T) -> Result<(), SubmissionError>
     where
         T: Runnable<E> + Send + 'static,
         E: Send + 'static,
     {
         let submission_guard = self.state.lock_submission();
         if self.state.is_not_running() {
-            return Err(RejectedExecution::Shutdown);
+            return Err(SubmissionError::Shutdown);
         }
         self.state.active_tasks.inc();
 
@@ -113,12 +125,9 @@ impl ExecutorService for TokioExecutorService {
     ///
     /// # Errors
     ///
-    /// Returns [`RejectedExecution::Shutdown`] if shutdown has already been
+    /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
     /// requested before the task is accepted.
-    fn submit_callable<C, R, E>(
-        &self,
-        task: C,
-    ) -> Result<Self::ResultHandle<R, E>, RejectedExecution>
+    fn submit_callable<C, R, E>(&self, task: C) -> Result<Self::ResultHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
@@ -126,11 +135,11 @@ impl ExecutorService for TokioExecutorService {
     {
         let submission_guard = self.state.lock_submission();
         if self.state.is_not_running() {
-            return Err(RejectedExecution::Shutdown);
+            return Err(SubmissionError::Shutdown);
         }
         self.state.active_tasks.inc();
 
-        let (handle, completion) = TaskCompletionPair::new().into_parts();
+        let (handle, completion) = TaskEndpointPair::new().into_parts();
         let abort_completion = completion.clone();
         let marker = Arc::new(());
         let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
@@ -158,12 +167,12 @@ impl ExecutorService for TokioExecutorService {
     ///
     /// # Errors
     ///
-    /// Returns [`RejectedExecution::Shutdown`] if shutdown has already been
+    /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
     /// requested before the task is accepted.
     fn submit_tracked_callable<C, R, E>(
         &self,
         task: C,
-    ) -> Result<Self::TrackedHandle<R, E>, RejectedExecution>
+    ) -> Result<Self::TrackedHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
@@ -171,11 +180,11 @@ impl ExecutorService for TokioExecutorService {
     {
         let submission_guard = self.state.lock_submission();
         if self.state.is_not_running() {
-            return Err(RejectedExecution::Shutdown);
+            return Err(SubmissionError::Shutdown);
         }
         self.state.active_tasks.inc();
 
-        let (handle, completion) = TaskCompletionPair::new().into_tracked_parts();
+        let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
         let abort_completion = completion.clone();
         let marker = Arc::new(());
         let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
@@ -234,25 +243,10 @@ impl ExecutorService for TokioExecutorService {
         self.lifecycle() == ExecutorServiceLifecycle::Terminated
     }
 
-    /// Waits until the service has terminated.
-    ///
-    /// # Returns
-    ///
-    /// A future that resolves after shutdown has been requested and all
-    /// accepted Tokio blocking tasks have finished or were cancelled before
-    /// their closures started.
-    fn await_termination(&self) -> Self::Termination<'_> {
-        Box::pin(async move {
-            let notified = self.state.terminated_notify.notified();
-            tokio::pin!(notified);
-            loop {
-                notified.as_mut().enable();
-                if self.is_terminated() {
-                    return;
-                }
-                notified.as_mut().await;
-                notified.set(self.state.terminated_notify.notified());
-            }
-        })
+    /// Blocks until the service has terminated.
+    fn wait_termination(&self) {
+        while !self.is_terminated() {
+            thread::sleep(Duration::from_millis(1));
+        }
     }
 }
