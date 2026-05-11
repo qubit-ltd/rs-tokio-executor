@@ -1,6 +1,6 @@
 # Qubit Tokio Executor
 
-[![CircleCI](https://circleci.com/gh/qubit-ltd/rs-tokio-executor.svg?style=shield)](https://circleci.com/gh/qubit-ltd/rs-tokio-executor)
+[![Rust CI](https://github.com/qubit-ltd/rs-tokio-executor/actions/workflows/ci.yml/badge.svg)](https://github.com/qubit-ltd/rs-tokio-executor/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/qubit-ltd/rs-tokio-executor/badge.svg?branch=main)](https://coveralls.io/github/qubit-ltd/rs-tokio-executor?branch=main)
 [![Crates.io](https://img.shields.io/crates/v/qubit-tokio-executor.svg?color=blue)](https://crates.io/crates/qubit-tokio-executor)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
