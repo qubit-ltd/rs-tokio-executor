@@ -176,7 +176,7 @@ fn test_tokio_executor_service_stop_cancels_queued_tracked_task() {
         assert!(report.cancelled >= 1);
         assert!(service.is_not_running());
         assert!(service.is_terminated());
-        assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
+        assert!(matches!(handle.await, Err(TaskExecutionError::Dropped)));
     });
 }
 

@@ -143,6 +143,7 @@ impl ExecutorService for TokioExecutorService {
         self.state.active_tasks.inc();
 
         let (handle, completion) = TaskEndpointPair::new().into_parts();
+        completion.accept();
         let completion = Arc::new(Mutex::new(Some(completion)));
         let abort_completion = Arc::clone(&completion);
         let marker = Arc::new(());
@@ -163,9 +164,7 @@ impl ExecutorService for TokioExecutorService {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .take();
-                if let Some(completion) = completion {
-                    completion.cancel();
-                }
+                drop(completion);
             });
         drop(submission_guard);
         Ok(handle)
@@ -201,6 +200,7 @@ impl ExecutorService for TokioExecutorService {
         self.state.active_tasks.inc();
 
         let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
+        completion.accept();
         let completion = Arc::new(Mutex::new(Some(completion)));
         let abort_completion = Arc::clone(&completion);
         let marker = Arc::new(());
@@ -221,9 +221,7 @@ impl ExecutorService for TokioExecutorService {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .take();
-                if let Some(completion) = completion {
-                    completion.cancel();
-                }
+                drop(completion);
             });
         drop(submission_guard);
         Ok(handle)
