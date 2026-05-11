@@ -13,12 +13,17 @@ readme = "README.md"
 keywords = ["tokio", "executor", "async", "concurrency"]
 categories = ["concurrency", "asynchronous"]
 exclude = [
+    "align-ci.sh",
     "coverage.sh",
+    "ci-check.sh",
+    "style-check.sh",
+    "update-submodule.sh",
+    ".github/*",
+    ".llvm-cov.toml",
+    ".rs-ci/*",
+    ".qubit-style-allowlist",
     "COVERAGE.md",
     "COVERAGE.zh_CN.md",
-    ".circleci/*",
-    "ci-check.sh",
-    ".llvm-cov.toml",
     ".cargo-audit.toml.example",
 ]
 
