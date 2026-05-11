@@ -8,7 +8,10 @@
  *
  ******************************************************************************/
 use std::{
-    sync::Arc,
+    sync::{
+        Arc,
+        Mutex,
+    },
     thread,
     time::Duration,
 };
@@ -140,16 +143,29 @@ impl ExecutorService for TokioExecutorService {
         self.state.active_tasks.inc();
 
         let (handle, completion) = TaskEndpointPair::new().into_parts();
-        let abort_completion = completion.clone();
+        let completion = Arc::new(Mutex::new(Some(completion)));
+        let abort_completion = Arc::clone(&completion);
         let marker = Arc::new(());
         let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
         let join_handle = tokio::task::spawn_blocking(move || {
             let _guard = guard;
-            TaskRunner::new(task).run(completion);
+            let completion = completion
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(completion) = completion {
+                TaskRunner::new(task).run(completion);
+            }
         });
         self.state
             .register_abort_handle(marker, join_handle.abort_handle(), move || {
-                let _ = abort_completion.cancel();
+                let completion = abort_completion
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                if let Some(completion) = completion {
+                    completion.cancel();
+                }
             });
         drop(submission_guard);
         Ok(handle)
@@ -185,16 +201,29 @@ impl ExecutorService for TokioExecutorService {
         self.state.active_tasks.inc();
 
         let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
-        let abort_completion = completion.clone();
+        let completion = Arc::new(Mutex::new(Some(completion)));
+        let abort_completion = Arc::clone(&completion);
         let marker = Arc::new(());
         let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
         let join_handle = tokio::task::spawn_blocking(move || {
             let _guard = guard;
-            TaskRunner::new(task).run(completion);
+            let completion = completion
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(completion) = completion {
+                TaskRunner::new(task).run(completion);
+            }
         });
         self.state
             .register_abort_handle(marker, join_handle.abort_handle(), move || {
-                let _ = abort_completion.cancel();
+                let completion = abort_completion
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                if let Some(completion) = completion {
+                    completion.cancel();
+                }
             });
         drop(submission_guard);
         Ok(handle)
