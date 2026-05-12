@@ -164,7 +164,9 @@ impl ExecutorService for TokioExecutorService {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .take();
-                drop(completion);
+                if let Some(completion) = completion {
+                    let _cancelled = completion.cancel_unstarted();
+                }
             });
         drop(submission_guard);
         Ok(handle)
@@ -221,7 +223,9 @@ impl ExecutorService for TokioExecutorService {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .take();
-                drop(completion);
+                if let Some(completion) = completion {
+                    let _cancelled = completion.cancel_unstarted();
+                }
             });
         drop(submission_guard);
         Ok(handle)
