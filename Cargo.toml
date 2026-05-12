@@ -30,7 +30,7 @@ doctest = true
 [dependencies]
 tokio = { version = "1.52", features = ["rt", "sync"] }
 
-qubit-atomic = "0.10"
+qubit-atomic = "0.11"
 qubit-function = "0.13"
 qubit-executor = "0.3"
 
