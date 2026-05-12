@@ -632,9 +632,9 @@ checksum = "6f8f052350ff3e4adffde1814a929c8403af2307552d2b4d0253f47818d26c09"
 
 [[package]]
 name = "qubit-executor"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "141d52bec75870d29f41660a9c3043f2fcd6c76f54e2978c09ce4089ebf32e16"
+checksum = "e98f28b4bff91758d669ce5d1fdf684d01979bf486dd3043b767dc379ecebcee"
 dependencies = [
  "log",
  "oneshot",
