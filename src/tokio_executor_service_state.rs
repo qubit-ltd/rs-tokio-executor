@@ -7,11 +7,19 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::sync::{Arc, Mutex, MutexGuard, atomic::AtomicU8};
+use std::sync::{
+    Arc,
+    Mutex,
+    MutexGuard,
+    atomic::AtomicU8,
+};
 
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::Monitor;
-use tokio::{sync::Notify, task::AbortHandle};
+use tokio::{
+    sync::Notify,
+    task::AbortHandle,
+};
 
 use crate::executor_service_lifecycle_bits;
 
@@ -68,14 +76,6 @@ impl TokioExecutorTaskCounts {
     }
 }
 
-/// Snapshot of blocking task counts used for stop reporting.
-pub(crate) struct TokioExecutorTaskCountSnapshot {
-    /// Number of queued accepted tasks.
-    pub(crate) queued: usize,
-    /// Number of running accepted tasks.
-    pub(crate) running: usize,
-}
-
 /// Shared state for [`crate::TokioExecutorService`].
 #[derive(Default)]
 pub(crate) struct TokioExecutorServiceState {
@@ -130,12 +130,14 @@ impl TokioExecutorServiceState {
     }
 
     /// Returns the current queued and running task counts.
-    pub(crate) fn task_count_snapshot(&self) -> TokioExecutorTaskCountSnapshot {
+    ///
+    /// # Returns
+    ///
+    /// A tuple whose first element is the queued count and second element is
+    /// the running count.
+    pub(crate) fn task_count_snapshot(&self) -> (usize, usize) {
         self.task_counts
-            .read(|counts| TokioExecutorTaskCountSnapshot {
-                queued: counts.queued,
-                running: counts.running,
-            })
+            .read(|counts| (counts.queued, counts.running))
     }
 
     /// Registers an abort handle if the task has not already finished.

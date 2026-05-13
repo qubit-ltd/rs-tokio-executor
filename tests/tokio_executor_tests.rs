@@ -9,10 +9,20 @@
  ******************************************************************************/
 //! Tests for [`TokioExecutor`](qubit_tokio_executor::TokioExecutor).
 
-use std::{io, sync::mpsc, time::Duration};
+use std::{
+    io,
+    sync::mpsc,
+    time::Duration,
+};
 
-use qubit_executor::{CancelResult, TaskExecutionError};
-use qubit_tokio_executor::{Executor, TokioExecutor};
+use qubit_executor::{
+    CancelResult,
+    TaskExecutionError,
+};
+use qubit_tokio_executor::{
+    Executor,
+    TokioExecutor,
+};
 
 #[tokio::test]
 async fn test_tokio_executor_execute_returns_future_result() {

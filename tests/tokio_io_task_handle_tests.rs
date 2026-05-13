@@ -9,7 +9,10 @@
  ******************************************************************************/
 use std::io;
 
-use qubit_executor::{CancelResult, TaskExecutionError};
+use qubit_executor::{
+    CancelResult,
+    TaskExecutionError,
+};
 use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]

@@ -7,16 +7,24 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::{future::IntoFuture, sync::Arc};
+use std::future::IntoFuture;
 
 use qubit_executor::task::TaskHandleFuture;
 use qubit_executor::{
-    CancelResult, TaskResult, TaskStatus, TrackedTask, TryGet,
-    task::spi::{TaskResultHandle, TrackedTaskHandle},
+    CancelResult,
+    TaskResult,
+    TaskStatus,
+    TrackedTask,
+    TryGet,
+    task::spi::{
+        TaskResultHandle,
+        TrackedTaskHandle,
+    },
 };
 use tokio::task::AbortHandle;
 
-use crate::tokio_service_task_guard::TokioServiceTaskTracker;
+/// Callback used to finish service-side queued-task accounting.
+type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 
 /// Tracked handle for tasks submitted to Tokio's blocking task pool.
 ///
@@ -32,8 +40,8 @@ pub struct TokioBlockingTaskHandle<R, E> {
     handle: TrackedTask<R, E>,
     /// Tokio abort handle used to remove queued blocking work after cancellation.
     abort_handle: AbortHandle,
-    /// Service-side accounting tracker for this accepted task.
-    task_tracker: Arc<TokioServiceTaskTracker>,
+    /// Callback that completes queued-task accounting after cancellation wins.
+    cancel_queued_task: CancelQueuedTask,
 }
 
 impl<R, E> TokioBlockingTaskHandle<R, E> {
@@ -43,21 +51,25 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     ///
     /// * `handle` - Standard tracked task endpoint.
     /// * `abort_handle` - Tokio abort handle for the submitted blocking task.
-    /// * `task_tracker` - Service-side accounting tracker for the task.
+    /// * `cancel_queued_task` - Callback that finishes service-side queued
+    ///   task accounting when cancellation wins before the task starts.
     ///
     /// # Returns
     ///
     /// A tracked Tokio blocking task handle.
     #[inline]
-    pub(crate) fn new(
+    pub(crate) fn new<F>(
         handle: TrackedTask<R, E>,
         abort_handle: AbortHandle,
-        task_tracker: Arc<TokioServiceTaskTracker>,
-    ) -> Self {
+        cancel_queued_task: F,
+    ) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
         Self {
             handle,
             abort_handle,
-            task_tracker,
+            cancel_queued_task: Box::new(cancel_queued_task),
         }
     }
 
@@ -131,7 +143,7 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
         let result = self.handle.cancel();
         if result == CancelResult::Cancelled {
             self.abort_handle.abort();
-            self.task_tracker.finish_queued();
+            (self.cancel_queued_task)();
         }
         result
     }
@@ -160,14 +172,14 @@ where
         let Self {
             handle,
             abort_handle,
-            task_tracker,
+            cancel_queued_task,
         } = self;
         match handle.try_get() {
             TryGet::Ready(result) => TryGet::Ready(result),
             TryGet::Pending(handle) => TryGet::Pending(Self {
                 handle,
                 abort_handle,
-                task_tracker,
+                cancel_queued_task,
             }),
         }
     }

@@ -11,14 +11,20 @@ use std::{
     io,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{
+            AtomicBool,
+            Ordering,
+        },
         mpsc,
     },
     time::Duration,
 };
 
 use qubit_executor::service::ExecutorService;
-use qubit_executor::{CancelResult, TaskExecutionError};
+use qubit_executor::{
+    CancelResult,
+    TaskExecutionError,
+};
 use qubit_tokio_executor::TokioExecutorService;
 
 #[test]

@@ -9,7 +9,10 @@
  ******************************************************************************/
 use std::sync::{
     Arc,
-    atomic::{AtomicU8, Ordering},
+    atomic::{
+        AtomicU8,
+        Ordering,
+    },
 };
 
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
@@ -22,7 +25,7 @@ const TASK_STATE_RUNNING: u8 = 1;
 const TASK_STATE_FINISHED: u8 = 2;
 
 /// Shared service-side accounting tracker for one blocking Tokio task.
-pub(crate) struct TokioServiceTaskTracker {
+struct TokioServiceTaskTracker {
     /// Shared service state updated by this tracker.
     state: Arc<TokioExecutorServiceState>,
     /// Service-local marker for removing the tracked abort handle.
@@ -122,13 +125,16 @@ impl TokioServiceTaskGuard {
     ///
     /// # Parameters
     ///
-    /// * `tracker` - Shared accounting tracker for the guarded task.
+    /// * `state` - Shared service state whose task counters this guard updates.
+    /// * `marker` - Service-local marker associated with the task.
     ///
     /// # Returns
     ///
     /// A lifecycle guard bound to the supplied tracker.
-    pub(crate) fn new(tracker: Arc<TokioServiceTaskTracker>) -> Self {
-        Self { tracker }
+    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<()>) -> Self {
+        Self {
+            tracker: Arc::new(TokioServiceTaskTracker::new(state, marker)),
+        }
     }
 
     /// Marks the guarded task as started.
@@ -139,6 +145,32 @@ impl TokioServiceTaskGuard {
     /// while queued.
     pub(crate) fn mark_started(&self) -> bool {
         self.tracker.mark_started()
+    }
+
+    /// Creates a one-shot callback that finishes queued-task accounting.
+    ///
+    /// # Returns
+    ///
+    /// A callback used by service stop handling when Tokio aborts a queued
+    /// blocking task before its closure starts.
+    pub(crate) fn finish_queued_once_callback(&self) -> impl FnOnce() + Send + 'static {
+        let tracker = Arc::clone(&self.tracker);
+        move || {
+            tracker.finish_queued();
+        }
+    }
+
+    /// Creates a reusable callback that finishes queued-task accounting.
+    ///
+    /// # Returns
+    ///
+    /// A callback used by tracked task handles when user cancellation wins
+    /// before the blocking closure starts.
+    pub(crate) fn finish_queued_callback(&self) -> impl Fn() + Send + Sync + 'static {
+        let tracker = Arc::clone(&self.tracker);
+        move || {
+            tracker.finish_queued();
+        }
     }
 }
 

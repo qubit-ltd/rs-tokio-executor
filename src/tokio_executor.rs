@@ -13,7 +13,10 @@ use qubit_executor::{
     TrackedTask,
     executor::Executor,
     service::SubmissionError,
-    task::spi::{TaskEndpointPair, TaskRunner},
+    task::spi::{
+        TaskEndpointPair,
+        TaskRunner,
+    },
 };
 
 /// Executes callable tasks on Tokio's blocking task pool.
