@@ -33,6 +33,7 @@ tokio = { version = "1.52", features = ["rt", "sync"] }
 qubit-atomic = "0.11"
 qubit-function = "0.13"
 qubit-executor = "0.3"
+qubit-lock = "0.5"
 
 [dev-dependencies]
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }

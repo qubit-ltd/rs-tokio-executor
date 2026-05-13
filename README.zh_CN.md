@@ -21,9 +21,9 @@ Qubit Tokio Executor 将 Qubit executor 抽象适配到 Tokio。它为通过 `to
 - 提供 `TokioExecutorService`，用于基于 `spawn_blocking` 的托管 blocking 工作。
 - 提供 `TokioBlockingExecutorService` 别名，用于明确表达 Tokio blocking 执行域。
 - 提供 `TokioIoExecutorService`，用于基于 `tokio::spawn` 的 async `Future` 工作。
-- 提供 `TokioTaskHandle`，支持 await、取消、完成状态检查与任务结果报告。
-- 提供 `TokioExecution`，作为 Tokio-backed executor API 使用的执行结果载体。
-- 再导出共享的 `ExecutorService`、`RejectedExecution` 与 `StopReport`，便于使用方导入。
+- 提供 `TokioBlockingTaskHandle`，用于 tracked blocking 任务的开始前取消。
+- 提供 `TokioTaskHandle`，用于 async IO 任务的 Tokio abort-based 取消。
+- 再导出共享的 `ExecutorService`、`SubmissionError`、`StopReport` 与 `CancelResult`，便于使用方导入。
 
 ## Runtime 要求
 
@@ -31,7 +31,7 @@ Qubit Tokio Executor 将 Qubit executor 抽象适配到 Tokio。它为通过 `to
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.1.0"
+qubit-tokio-executor = "0.2.0"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
@@ -45,9 +45,9 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 
 ## 关闭与取消
 
-`submit` 或 `spawn` 成功只表示服务接受了任务。Blocking callable 提交通过共享的 `TaskHandle` 报告结果；tracked blocking 提交返回 `TrackedTask`。Async IO 提交仍使用 `TokioTaskHandle`，因为它直接包装 Tokio `JoinHandle`。
+`submit` 或 `spawn` 成功只表示服务接受了任务。Blocking callable 提交通过共享的 `TaskHandle` 报告结果；tracked blocking 提交返回 `TokioBlockingTaskHandle`，它把共享 tracked-task 状态与 Tokio abort handle 结合起来，用于处理 queued blocking 任务。Async IO 提交使用 `TokioTaskHandle`，因为它直接包装 Tokio `JoinHandle`。
 
-`shutdown` 拒绝新任务，并允许已接受任务完成。`stop` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务通过 Tokio abort handle 中止；通过 Tokio 提交的 blocking 任务只能在开始前取消，已经运行的 blocking 代码不能被 Rust 强制停止，服务终止会等待这些代码返回。
+`shutdown` 拒绝新任务，并允许已接受任务完成。`stop` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务通过 Tokio abort handle 中止；通过 Tokio 提交的 blocking 任务只能在 blocking 闭包开始前取消。Queued tracked blocking 任务取消成功后会立即从 service 计数中移除；已经运行的 blocking 代码不能被 Rust 强制停止，服务终止会等待这些代码返回。
 
 ## 快速开始
 

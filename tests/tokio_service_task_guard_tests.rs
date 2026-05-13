@@ -1,12 +1,6 @@
-use std::{
-    io,
-    time::Duration,
-};
+use std::{io, time::Duration};
 
-use qubit_tokio_executor::{
-    ExecutorService,
-    TokioExecutorService,
-};
+use qubit_tokio_executor::{ExecutorService, TokioExecutorService};
 
 #[tokio::test]
 async fn test_tokio_service_task_guard_notifies_termination_when_last_task_drops() {
