@@ -7,11 +7,19 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::sync::{Arc, Mutex, MutexGuard, atomic::AtomicU8};
+use std::sync::{
+    Arc,
+    Mutex,
+    MutexGuard,
+    atomic::AtomicU8,
+};
 
 use qubit_atomic::AtomicCount;
 use qubit_executor::service::ExecutorServiceLifecycle;
-use tokio::{sync::Notify, task::AbortHandle};
+use tokio::{
+    sync::Notify,
+    task::AbortHandle,
+};
 
 use crate::executor_service_lifecycle_bits;
 

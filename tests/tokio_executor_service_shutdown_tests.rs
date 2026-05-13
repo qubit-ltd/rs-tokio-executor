@@ -7,11 +7,18 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::{io, sync::mpsc, time::Duration};
+use std::{
+    io,
+    sync::mpsc,
+    time::Duration,
+};
 
 use qubit_executor::{
     TaskExecutionError,
-    service::{ExecutorService, SubmissionError},
+    service::{
+        ExecutorService,
+        SubmissionError,
+    },
 };
 use qubit_tokio_executor::TokioExecutorService;
 
