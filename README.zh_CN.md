@@ -1,7 +1,7 @@
 # Qubit Tokio Executor
 
 [![Rust CI](https://github.com/qubit-ltd/rs-tokio-executor/actions/workflows/ci.yml/badge.svg)](https://github.com/qubit-ltd/rs-tokio-executor/actions/workflows/ci.yml)
-[![Coverage Status](https://coveralls.io/repos/github/qubit-ltd/rs-tokio-executor/badge.svg?branch=main)](https://coveralls.io/github/qubit-ltd/rs-tokio-executor?branch=main)
+[![Coverage](https://img.shields.io/endpoint?url=https://qubit-ltd.github.io/rs-tokio-executor/coverage-badge.json)](https://qubit-ltd.github.io/rs-tokio-executor/coverage/)
 [![Crates.io](https://img.shields.io/crates/v/qubit-tokio-executor.svg?color=blue)](https://crates.io/crates/qubit-tokio-executor)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -31,7 +31,7 @@ Qubit Tokio Executor 将 Qubit executor 抽象适配到 Tokio。它为通过 `to
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.2.0"
+qubit-tokio-executor = "0.3.0"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
