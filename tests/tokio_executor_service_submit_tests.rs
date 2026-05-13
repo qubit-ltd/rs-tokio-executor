@@ -9,10 +9,7 @@
  ******************************************************************************/
 use std::io;
 
-use qubit_executor::{
-    TaskExecutionError,
-    service::ExecutorService,
-};
+use qubit_executor::{TaskExecutionError, service::ExecutorService};
 use qubit_tokio_executor::TokioExecutorService;
 
 fn ok_unit_task() -> Result<(), io::Error> {

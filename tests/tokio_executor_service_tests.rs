@@ -1,17 +1,11 @@
 use std::io;
 
 use qubit_tokio_executor::{
-    ExecutorService,
-    ExecutorServiceLifecycle,
-    SubmissionError,
-    TokioExecutorService,
+    ExecutorService, ExecutorServiceLifecycle, SubmissionError, TokioExecutorService,
 };
 use std::sync::{
     Arc,
-    atomic::{
-        AtomicBool,
-        Ordering,
-    },
+    atomic::{AtomicBool, Ordering},
 };
 
 #[tokio::test]

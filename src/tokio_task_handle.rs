@@ -10,21 +10,12 @@
 use std::{
     future::Future,
     pin::Pin,
-    task::{
-        Context,
-        Poll,
-    },
+    task::{Context, Poll},
 };
 
-use tokio::task::{
-    JoinError,
-    JoinHandle,
-};
+use tokio::task::{JoinError, JoinHandle};
 
-use qubit_executor::{
-    TaskExecutionError,
-    TaskResult,
-};
+use qubit_executor::{CancelResult, TaskExecutionError, TaskResult};
 
 /// Async handle returned by Tokio-backed executor services.
 ///
@@ -64,11 +55,17 @@ impl<R, E> TokioTaskHandle<R, E> {
     ///
     /// # Returns
     ///
-    /// `true` after cancellation has been requested.
+    /// [`CancelResult::Cancelled`] when an abort request was sent, or
+    /// [`CancelResult::AlreadyFinished`] if the Tokio task had already
+    /// completed.
+    #[must_use]
     #[inline]
-    pub fn cancel(&self) -> bool {
+    pub fn cancel(&self) -> CancelResult {
+        if self.handle.is_finished() {
+            return CancelResult::AlreadyFinished;
+        }
         self.handle.abort();
-        true
+        CancelResult::Cancelled
     }
 
     /// Returns whether the underlying Tokio task has finished.

@@ -26,9 +26,9 @@ application.
 - `TokioExecutorService` for managed blocking work backed by `spawn_blocking`.
 - `TokioBlockingExecutorService` alias for naming the Tokio blocking domain explicitly.
 - `TokioIoExecutorService` for async `Future` work backed by `tokio::spawn`.
-- `TokioTaskHandle` for awaiting, cancellation, completion checks, and task-result reporting.
-- `TokioExecution` as the execution carrier used by Tokio-backed executor APIs.
-- Shared `ExecutorService`, `RejectedExecution`, and `StopReport` re-exports for convenient imports.
+- `TokioBlockingTaskHandle` for tracked blocking tasks with pre-start cancellation.
+- `TokioTaskHandle` for async IO tasks with Tokio abort-based cancellation.
+- Shared `ExecutorService`, `SubmissionError`, `StopReport`, and `CancelResult` re-exports for convenient imports.
 
 ## Runtime Requirement
 
@@ -37,7 +37,7 @@ Tokio runtime features you need in `Cargo.toml`:
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.1.0"
+qubit-tokio-executor = "0.2.0"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
@@ -59,15 +59,18 @@ the future body.
 
 A successful `submit` or `spawn` means only that the service accepted the task.
 Blocking callable submissions report results through the shared `TaskHandle`;
-tracked blocking submissions return `TrackedTask`. Async IO submissions still
-use `TokioTaskHandle` because they wrap Tokio `JoinHandle`s directly.
+tracked blocking submissions return `TokioBlockingTaskHandle`, which combines
+the shared tracked-task state with Tokio's abort handle for queued blocking
+tasks. Async IO submissions use `TokioTaskHandle` because they wrap Tokio
+`JoinHandle`s directly.
 
 `shutdown` rejects new tasks and lets accepted tasks finish. `stop`
 rejects new tasks and requests cancellation or abort for tracked Tokio tasks.
 Async IO tasks are aborted through Tokio abort handles. Blocking tasks submitted
-through Tokio can be cancelled only before they start; already running blocking
-code cannot be forcibly stopped by Rust, and service termination waits for that
-code to return.
+through Tokio can be cancelled only before their blocking closure starts. Queued
+tracked blocking tasks are removed from service accounting immediately after
+successful cancellation; already running blocking code cannot be forcibly
+stopped by Rust, and service termination waits for that code to return.
 
 ## Quick Start
 

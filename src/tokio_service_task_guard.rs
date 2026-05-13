@@ -7,41 +7,147 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
 
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 
-/// Task lifecycle guard for [`crate::TokioExecutorService`].
-pub(crate) struct TokioServiceTaskGuard {
-    /// Shared service state updated when the guard is dropped.
+/// State value for a task accepted but not yet started.
+const TASK_STATE_QUEUED: u8 = 0;
+/// State value for a task whose blocking closure has started.
+const TASK_STATE_RUNNING: u8 = 1;
+/// State value for a task whose service-side accounting has finished.
+const TASK_STATE_FINISHED: u8 = 2;
+
+/// Shared service-side accounting tracker for one blocking Tokio task.
+pub(crate) struct TokioServiceTaskTracker {
+    /// Shared service state updated by this tracker.
     state: Arc<TokioExecutorServiceState>,
     /// Service-local marker for removing the tracked abort handle.
     marker: Arc<()>,
+    /// One-way task accounting state.
+    task_state: AtomicU8,
 }
 
-impl TokioServiceTaskGuard {
-    /// Creates a guard that decrements the active task count on drop.
+impl TokioServiceTaskTracker {
+    /// Creates a queued task tracker.
     ///
     /// # Parameters
     ///
-    /// * `state` - Shared state whose active-task counter is decremented when
-    ///   the guard is dropped.
-    /// * `marker` - Service-local marker for the task guarded by this value.
+    /// * `state` - Shared service state whose task counters this tracker updates.
+    /// * `marker` - Service-local marker associated with the task.
     ///
     /// # Returns
     ///
-    /// A lifecycle guard bound to the supplied service state.
+    /// A tracker initialized in the queued state.
     pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<()>) -> Self {
-        Self { state, marker }
+        Self {
+            state,
+            marker,
+            task_state: AtomicU8::new(TASK_STATE_QUEUED),
+        }
+    }
+
+    /// Returns the service-local task marker.
+    ///
+    /// # Returns
+    ///
+    /// The marker used to match a tracked Tokio abort handle.
+    #[inline]
+    pub(crate) fn marker(&self) -> &Arc<()> {
+        &self.marker
+    }
+
+    /// Moves this task from queued to running if it has not already finished.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the task may run, or `false` if it was cancelled while queued.
+    pub(crate) fn mark_started(&self) -> bool {
+        match self.task_state.compare_exchange(
+            TASK_STATE_QUEUED,
+            TASK_STATE_RUNNING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => {
+                self.state.mark_task_started();
+                true
+            }
+            Err(TASK_STATE_RUNNING) => true,
+            Err(_) => false,
+        }
+    }
+
+    /// Finishes this task only if it is still queued.
+    ///
+    /// # Returns
+    ///
+    /// `true` if queued-task accounting was completed by this call.
+    pub(crate) fn finish_queued(&self) -> bool {
+        match self.task_state.compare_exchange(
+            TASK_STATE_QUEUED,
+            TASK_STATE_FINISHED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => {
+                self.state.finish_task(false);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Finishes this task from its current accounting state.
+    pub(crate) fn finish(&self) {
+        match self.task_state.swap(TASK_STATE_FINISHED, Ordering::AcqRel) {
+            TASK_STATE_QUEUED => self.state.finish_task(false),
+            TASK_STATE_RUNNING => self.state.finish_task(true),
+            _ => {}
+        }
+    }
+}
+
+/// Task lifecycle guard for [`crate::TokioExecutorService`].
+pub(crate) struct TokioServiceTaskGuard {
+    /// Shared task tracker updated when the guard is dropped.
+    tracker: Arc<TokioServiceTaskTracker>,
+}
+
+impl TokioServiceTaskGuard {
+    /// Creates a guard that finishes service-side task accounting on drop.
+    ///
+    /// # Parameters
+    ///
+    /// * `tracker` - Shared accounting tracker for the guarded task.
+    ///
+    /// # Returns
+    ///
+    /// A lifecycle guard bound to the supplied tracker.
+    pub(crate) fn new(tracker: Arc<TokioServiceTaskTracker>) -> Self {
+        Self { tracker }
+    }
+
+    /// Marks the guarded task as started.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the task should run, or `false` if it was already cancelled
+    /// while queued.
+    pub(crate) fn mark_started(&self) -> bool {
+        self.tracker.mark_started()
     }
 }
 
 impl Drop for TokioServiceTaskGuard {
     /// Updates service counters when a task completes or is aborted.
     fn drop(&mut self) {
-        self.state.remove_abort_handle(&self.marker);
-        if self.state.active_tasks.dec() == 0 {
-            self.state.notify_if_terminated();
-        }
+        self.tracker
+            .state
+            .remove_abort_handle(self.tracker.marker());
+        self.tracker.finish();
     }
 }

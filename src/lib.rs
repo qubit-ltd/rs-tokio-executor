@@ -13,7 +13,7 @@
 //!
 
 mod executor_service_lifecycle_bits;
-mod tokio_execution;
+mod tokio_blocking_task_handle;
 mod tokio_executor;
 mod tokio_executor_service;
 mod tokio_executor_service_state;
@@ -25,50 +25,22 @@ mod tokio_task_handle;
 
 pub use qubit_executor::executor::Executor;
 pub use qubit_executor::service::{
-    ExecutorService,
-    ExecutorServiceLifecycle,
-    StopReport,
-    SubmissionError,
+    ExecutorService, ExecutorServiceLifecycle, StopReport, SubmissionError,
 };
-pub use qubit_executor::task::spi::{
-    TaskResultHandle,
-    TrackedTaskHandle,
-};
-pub use qubit_executor::{
-    CancelResult,
-    TaskHandle,
-    TaskResult,
-    TaskStatus,
-    TrackedTask,
-    TryGet,
-};
-pub use tokio_execution::TokioExecution;
+pub use qubit_executor::task::spi::{TaskResultHandle, TrackedTaskHandle};
+pub use qubit_executor::{CancelResult, TaskHandle, TaskResult, TaskStatus, TrackedTask, TryGet};
+pub use tokio_blocking_task_handle::TokioBlockingTaskHandle;
 pub use tokio_executor::TokioExecutor;
-pub use tokio_executor_service::{
-    TokioBlockingExecutorService,
-    TokioExecutorService,
-};
+pub use tokio_executor_service::{TokioBlockingExecutorService, TokioExecutorService};
 pub use tokio_io_executor_service::TokioIoExecutorService;
 pub use tokio_task_handle::TokioTaskHandle;
 
 /// Executor service compatibility exports for Tokio-backed users.
 pub mod service {
     pub use crate::{
-        CancelResult,
-        ExecutorService,
-        ExecutorServiceLifecycle,
-        StopReport,
-        SubmissionError,
-        TaskHandle,
-        TaskResult,
-        TaskResultHandle,
-        TaskStatus,
-        TokioBlockingExecutorService,
-        TokioExecutorService,
-        TokioIoExecutorService,
-        TokioTaskHandle,
-        TrackedTask,
-        TrackedTaskHandle,
-        TryGet,
+        CancelResult, ExecutorService, ExecutorServiceLifecycle, StopReport, SubmissionError,
+        TaskHandle, TaskResult, TaskResultHandle, TaskStatus, TokioBlockingExecutorService,
+        TokioBlockingTaskHandle, TokioExecutorService, TokioIoExecutorService, TokioTaskHandle,
+        TrackedTask, TrackedTaskHandle, TryGet,
     };
 }

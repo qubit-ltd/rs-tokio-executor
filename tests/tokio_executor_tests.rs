@@ -9,20 +9,10 @@
  ******************************************************************************/
 //! Tests for [`TokioExecutor`](qubit_tokio_executor::TokioExecutor).
 
-use std::{
-    io,
-    sync::mpsc,
-    time::Duration,
-};
+use std::{io, sync::mpsc, time::Duration};
 
-use qubit_executor::{
-    CancelResult,
-    TaskExecutionError,
-};
-use qubit_tokio_executor::{
-    Executor,
-    TokioExecutor,
-};
+use qubit_executor::{CancelResult, TaskExecutionError};
+use qubit_tokio_executor::{Executor, TokioExecutor};
 
 #[tokio::test]
 async fn test_tokio_executor_execute_returns_future_result() {
@@ -49,25 +39,22 @@ async fn test_tokio_executor_call_returns_future_value() {
 }
 
 #[tokio::test]
-async fn test_tokio_execution_is_finished_reports_completion() {
+async fn test_tokio_executor_tracked_task_is_done_reports_completion() {
     let executor = TokioExecutor;
 
-    let execution = executor
+    let task = executor
         .call(|| {
             std::thread::sleep(Duration::from_millis(25));
             Ok::<usize, io::Error>(42)
         })
         .expect("tokio executor should accept callable");
 
-    assert!(!execution.is_done());
-    assert_eq!(
-        execution.await.expect("tokio execution should complete"),
-        42,
-    );
+    assert!(!task.is_done());
+    assert_eq!(task.await.expect("tokio executor task should complete"), 42);
 }
 
 #[test]
-fn test_tokio_execution_cancel_queued_blocking_task_reports_cancelled() {
+fn test_tokio_executor_cancel_queued_blocking_task_reports_cancelled() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .max_blocking_threads(1)
         .enable_all()
@@ -90,26 +77,26 @@ fn test_tokio_execution_cancel_queued_blocking_task_reports_cancelled() {
             .expect("blocking slot should be occupied");
 
         let executor = TokioExecutor;
-        let execution = executor
+        let task = executor
             .call(|| Ok::<(), io::Error>(()))
             .expect("tokio executor should accept callable");
 
-        assert_eq!(execution.cancel(), CancelResult::Cancelled);
+        assert_eq!(task.cancel(), CancelResult::Cancelled);
         release_tx
             .send(())
             .expect("blocking task should receive release signal");
         blocker.await.expect("blocking slot task should finish");
 
-        let result = tokio::time::timeout(Duration::from_secs(1), execution)
+        let result = tokio::time::timeout(Duration::from_secs(1), task)
             .await
-            .expect("cancelled execution should complete promptly")
-            .expect_err("cancelled execution should report cancellation");
+            .expect("cancelled task should complete promptly")
+            .expect_err("cancelled task should report cancellation");
         assert!(matches!(result, TaskExecutionError::Cancelled));
     });
 }
 
 #[tokio::test]
-async fn test_tokio_execution_reports_task_panic() {
+async fn test_tokio_executor_reports_task_panic() {
     let executor = TokioExecutor;
 
     let result = executor

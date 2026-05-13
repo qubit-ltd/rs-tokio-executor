@@ -7,18 +7,11 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-use std::{
-    io,
-    sync::mpsc,
-    time::Duration,
-};
+use std::{io, sync::mpsc, time::Duration};
 
 use qubit_executor::{
     TaskExecutionError,
-    service::{
-        ExecutorService,
-        SubmissionError,
-    },
+    service::{ExecutorService, SubmissionError},
 };
 use qubit_tokio_executor::TokioExecutorService;
 
@@ -39,7 +32,7 @@ async fn test_tokio_executor_service_shutdown_rejects_new_tasks() {
 }
 
 #[tokio::test]
-async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
+async fn test_tokio_executor_service_wait_termination_waits_for_tasks() {
     let service = TokioExecutorService::new();
 
     let handle = service
@@ -51,6 +44,25 @@ async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
 
     service.shutdown();
     service.wait_termination();
+
+    handle.await.expect("task should complete successfully");
+    assert!(service.is_not_running());
+    assert!(service.is_terminated());
+}
+
+#[tokio::test]
+async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
+    let service = TokioExecutorService::new();
+
+    let handle = service
+        .submit_tracked(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            Ok::<(), io::Error>(())
+        })
+        .expect("service should accept task");
+
+    service.shutdown();
+    service.await_termination().await;
 
     handle.await.expect("task should complete successfully");
     assert!(service.is_not_running());
@@ -134,7 +146,9 @@ fn test_tokio_executor_service_stop_cancels_queued_detached_task() {
             .expect("blocking task should receive release signal");
         blocker.await.expect("blocking slot task should finish");
 
-        assert!(report.cancelled >= 1);
+        assert_eq!(report.queued, 1);
+        assert_eq!(report.running, 0);
+        assert_eq!(report.cancelled, 1);
         assert!(service.is_not_running());
     });
 }
@@ -173,7 +187,9 @@ fn test_tokio_executor_service_stop_cancels_queued_tracked_task() {
         blocker.await.expect("blocking slot task should finish");
         service.wait_termination();
 
-        assert!(report.cancelled >= 1);
+        assert_eq!(report.queued, 1);
+        assert_eq!(report.running, 0);
+        assert_eq!(report.cancelled, 1);
         assert!(service.is_not_running());
         assert!(service.is_terminated());
         assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));

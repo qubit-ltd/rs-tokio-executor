@@ -711,6 +711,7 @@ dependencies = [
  "qubit-atomic",
  "qubit-executor",
  "qubit-function",
+ "qubit-lock",
  "tokio",
 ]
 
