@@ -49,6 +49,10 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 
 `shutdown` 拒绝新任务，并允许已接受任务完成。`stop` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务取消会发送 best-effort Tokio abort 请求；`CancelResult::Cancelled` 只表示请求已发出，最终结果以 await 返回的 `TokioTaskHandle` 为准。通过 Tokio 提交的 blocking 任务只能在 blocking 闭包开始前取消。Queued tracked blocking 任务取消成功后会立即从 service 计数中移除；已经运行的 blocking 代码不能被 Rust 强制停止，服务终止会等待这些代码返回。
 
+对于 `TokioExecutorService`，`StopReport.cancelled` 只统计仍处于 queued 状态并实际取消成功的 blocking 任务。已经 running 的 blocking 任务会体现在 `StopReport.running` 中，即使 `stop` 对它们的 Tokio handle 发出了 abort 请求，也不会计入 `cancelled`。对于 `TokioIoExecutorService`，`StopReport.cancelled` 统计发出 Tokio abort 请求的 active async 任务。
+
+`TokioExecutor` 返回标准 `TrackedTask`。取消该 handle 时，如果取消先于任务 start，可以阻止用户 callable 执行，但它不会把已经提交到 Tokio blocking queue 的 `spawn_blocking` wrapper 移除。需要直接 abort queued Tokio blocking work 时，应使用 `TokioExecutorService` 的 tracked 提交。
+
 `TokioExecutorService` 同时提供阻塞式 `wait_termination` 和异步 `await_termination` service-level 等待。`TokioIoExecutorService` 有意不提供 service-level 异步等待；调用方需要观察 async 任务完成时，应 await `spawn` 返回的 task handle。
 
 ## 快速开始

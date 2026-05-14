@@ -75,6 +75,19 @@ immediately after successful cancellation; already running blocking code cannot
 be forcibly stopped by Rust, and service termination waits for that code to
 return.
 
+For `TokioExecutorService`, `StopReport.cancelled` counts blocking tasks that
+were actually cancelled while still queued. Running blocking tasks are reported
+through `StopReport.running` and are not counted as cancelled, even though
+`stop` requests abort for their Tokio handles. For `TokioIoExecutorService`,
+`StopReport.cancelled` counts active async tasks for which a Tokio abort request
+was sent.
+
+`TokioExecutor` returns the standard `TrackedTask`. Cancelling that handle can
+prevent the user callable from running if it wins before the task starts, but it
+does not remove the already submitted Tokio `spawn_blocking` wrapper from
+Tokio's blocking queue. Use tracked submissions through `TokioExecutorService`
+when queued Tokio blocking work must be aborted directly.
+
 `TokioExecutorService` exposes both blocking `wait_termination` and async
 `await_termination` service-level waiting. `TokioIoExecutorService` intentionally
 does not expose service-level async waiting; await the task handles returned by

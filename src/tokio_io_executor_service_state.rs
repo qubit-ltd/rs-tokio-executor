@@ -16,10 +16,7 @@ use std::sync::{
 
 use qubit_atomic::AtomicCount;
 use qubit_executor::service::ExecutorServiceLifecycle;
-use tokio::{
-    sync::Notify,
-    task::AbortHandle,
-};
+use tokio::task::AbortHandle;
 
 use crate::executor_service_lifecycle_bits;
 
@@ -42,8 +39,6 @@ pub(crate) struct TokioIoExecutorServiceState {
     submission_lock: Mutex<()>,
     /// Abort handles for async tasks accepted by this service.
     abort_handles: Mutex<Vec<TrackedAbortHandle>>,
-    /// Notifies waiters once shutdown has completed and no tasks remain active.
-    pub(crate) terminated_notify: Notify,
 }
 
 impl TokioIoExecutorServiceState {
@@ -100,13 +95,6 @@ impl TokioIoExecutorServiceState {
             }
         }
         cancellation_count
-    }
-
-    /// Wakes termination waiters when shutdown and task completion allow it.
-    pub(crate) fn notify_if_terminated(&self) {
-        if self.is_not_running() && self.active_tasks.is_zero() {
-            self.terminated_notify.notify_waiters();
-        }
     }
 
     /// Acquires the abort-handle list while tolerating poisoned locks.

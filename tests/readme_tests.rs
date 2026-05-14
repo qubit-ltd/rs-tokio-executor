@@ -73,20 +73,3 @@ fn test_readmes_limit_await_termination_to_blocking_service() {
         );
     }
 }
-
-/// Ensures the async IO service no longer exposes service-level async waiting.
-#[test]
-fn test_tokio_io_executor_service_does_not_expose_await_termination() {
-    let source = read_project_file("src/tokio_io_executor_service.rs");
-
-    assert!(!source.contains("pub fn await_termination"));
-}
-
-/// Ensures async task cancellation documentation describes abort-request semantics.
-#[test]
-fn test_tokio_task_handle_docs_describe_abort_request_semantics() {
-    let source = read_project_file("src/tokio_task_handle.rs");
-
-    assert!(source.contains("best-effort abort request"));
-    assert!(!source.contains("For blocking tasks submitted through `spawn_blocking`"));
-}

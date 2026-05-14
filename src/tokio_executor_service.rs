@@ -12,7 +12,6 @@ use std::{
     pin::Pin,
     sync::{
         Arc,
-        Mutex,
         MutexGuard,
     },
 };
@@ -29,9 +28,14 @@ use qubit_executor::task::spi::{
 };
 
 use crate::TokioBlockingTaskHandle;
-use crate::tokio_executor::ensure_tokio_runtime_entered;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
+use crate::tokio_runtime::ensure_tokio_runtime_entered;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
+use crate::tokio_task_slot_cancellation::{
+    cancel_unstarted_task_slot_if_queued,
+    share_task_slot,
+    take_task_slot,
+};
 use qubit_executor::service::{
     ExecutorService,
     ExecutorServiceLifecycle,
@@ -99,7 +103,9 @@ impl TokioExecutorService {
     /// * `marker` - Service-local marker associated with this task.
     /// * `guard` - Lifecycle guard that owns service-side task accounting.
     /// * `task` - Work to run after the blocking closure starts.
-    /// * `cancel` - Hook invoked by service stop when Tokio aborts queued work.
+    /// * `cancel` - Hook invoked by service stop when Tokio aborts queued
+    ///   work. It returns `true` only if queued service accounting was
+    ///   actually cancelled by that hook.
     ///
     /// # Returns
     ///
@@ -119,7 +125,7 @@ impl TokioExecutorService {
     ) -> AbortHandle
     where
         F: FnOnce() + Send + 'static,
-        C: FnOnce() + Send + 'static,
+        C: FnOnce() -> bool + Send + 'static,
     {
         let join_handle = tokio::task::spawn_blocking(move || {
             let guard = guard;
@@ -211,7 +217,7 @@ impl ExecutorService for TokioExecutorService {
         let (submission_guard, marker, guard) = self.prepare_blocking_submission()?;
         let (handle, completion) = TaskEndpointPair::new().into_parts();
         completion.accept();
-        let completion = Arc::new(Mutex::new(Some(completion)));
+        let completion = share_task_slot(completion);
         let abort_completion = Arc::clone(&completion);
         let abort_queued_task = guard.finish_queued_once_callback();
         self.spawn_accepted_blocking_task(
@@ -219,24 +225,11 @@ impl ExecutorService for TokioExecutorService {
             marker,
             guard,
             move || {
-                let completion = completion
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .take();
-                if let Some(completion) = completion {
+                if let Some(completion) = take_task_slot(&completion) {
                     TaskRunner::new(task).run(completion);
                 }
             },
-            move || {
-                let completion = abort_completion
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .take();
-                if let Some(completion) = completion {
-                    let _cancelled = completion.cancel_unstarted();
-                }
-                abort_queued_task();
-            },
+            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
         );
         Ok(handle)
     }
@@ -269,7 +262,7 @@ impl ExecutorService for TokioExecutorService {
         let (submission_guard, marker, guard) = self.prepare_blocking_submission()?;
         let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
         completion.accept();
-        let completion = Arc::new(Mutex::new(Some(completion)));
+        let completion = share_task_slot(completion);
         let abort_completion = Arc::clone(&completion);
         let abort_queued_task = guard.finish_queued_once_callback();
         let cancel_queued_task = guard.cancel_queued_callback();
@@ -278,24 +271,11 @@ impl ExecutorService for TokioExecutorService {
             marker,
             guard,
             move || {
-                let completion = completion
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .take();
-                if let Some(completion) = completion {
+                if let Some(completion) = take_task_slot(&completion) {
                     TaskRunner::new(task).run(completion);
                 }
             },
-            move || {
-                let completion = abort_completion
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .take();
-                if let Some(completion) = completion {
-                    let _cancelled = completion.cancel_unstarted();
-                }
-                abort_queued_task();
-            },
+            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
         );
         Ok(TokioBlockingTaskHandle::new(
             handle,
@@ -322,7 +302,8 @@ impl ExecutorService for TokioExecutorService {
     /// # Returns
     ///
     /// A report with queued and running blocking task counts observed when
-    /// stop was requested, plus the number of Tokio abort handles signalled.
+    /// stop was requested, plus the number of queued blocking tasks that were
+    /// actually cancelled before their blocking closures started.
     fn stop(&self) -> StopReport {
         let _guard = self.state.lock_submission();
         self.state.stop();

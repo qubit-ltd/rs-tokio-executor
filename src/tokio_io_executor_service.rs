@@ -15,9 +15,9 @@ use std::{
 use qubit_executor::TaskExecutionError;
 
 use crate::TokioTaskHandle;
-use crate::tokio_executor::ensure_tokio_runtime_entered;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
+use crate::tokio_runtime::ensure_tokio_runtime_entered;
 use qubit_executor::service::{
     ExecutorServiceLifecycle,
     StopReport,
@@ -28,6 +28,19 @@ use qubit_executor::service::{
 ///
 /// Accepted futures are spawned with [`tokio::spawn`], so waiting for external
 /// IO does not occupy a dedicated blocking thread.
+///
+/// `TokioIoExecutorService` intentionally has no service-level
+/// `await_termination` method. Await the task handles returned by
+/// [`Self::spawn`] when the caller needs to observe async task completion.
+///
+/// ```compile_fail
+/// # async fn check() {
+/// use qubit_tokio_executor::TokioIoExecutorService;
+///
+/// let service = TokioIoExecutorService::new();
+/// service.await_termination().await;
+/// # }
+/// ```
 #[derive(Default, Clone)]
 pub struct TokioIoExecutorService {
     /// Shared service state used by all clones of this service.
@@ -93,7 +106,6 @@ impl TokioIoExecutorService {
     pub fn shutdown(&self) {
         let _guard = self.state.lock_submission();
         self.state.shutdown();
-        self.state.notify_if_terminated();
     }
 
     /// Stops accepting new tasks and aborts tracked async tasks.
@@ -107,7 +119,6 @@ impl TokioIoExecutorService {
         self.state.stop();
         let running = self.state.active_tasks.get();
         let cancellation_count = self.state.abort_tracked_tasks();
-        self.state.notify_if_terminated();
         StopReport::new(0, running, cancellation_count)
     }
 
