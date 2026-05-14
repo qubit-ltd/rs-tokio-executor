@@ -19,26 +19,7 @@ use qubit_executor::{
     },
 };
 
-/// Verifies that the current thread is entered into a Tokio runtime.
-///
-/// # Returns
-///
-/// `Ok(())` when Tokio task spawning can use the current runtime.
-///
-/// # Errors
-///
-/// Returns [`SubmissionError::WorkerSpawnFailed`] when no Tokio runtime is
-/// entered on the current thread. Tokio's spawn APIs panic in that state, so
-/// public submission APIs use this helper to reject the task explicitly.
-pub(crate) fn ensure_tokio_runtime_entered() -> Result<(), SubmissionError> {
-    tokio::runtime::Handle::try_current()
-        .map(|_| ())
-        .map_err(|error| {
-            SubmissionError::worker_spawn_failed(std::io::Error::other(format!(
-                "Tokio runtime is not entered: {error}",
-            )))
-        })
-}
+use crate::tokio_runtime::ensure_tokio_runtime_entered;
 
 /// Executes callable tasks on Tokio's blocking task pool.
 ///
@@ -66,6 +47,14 @@ pub(crate) fn ensure_tokio_runtime_entered() -> Result<(), SubmissionError> {
 /// * **Blocking pool** — the closure runs on Tokio's *blocking* thread pool, not
 ///   on the core async worker threads, so heavy synchronous work does not
 ///   starve other async tasks on the runtime.
+/// * **Standard tracked-task cancellation** — the returned [`TrackedTask`]
+///   can cancel the user callable before it starts, but it does not own Tokio's
+///   [`AbortHandle`](tokio::task::AbortHandle). If the Tokio blocking queue has
+///   already accepted the wrapper closure, that wrapper may still wait for a
+///   blocking thread and then observe the cancelled tracked state without
+///   running the user callable. Use [`TokioExecutorService`](crate::TokioExecutorService)
+///   and [`TokioBlockingTaskHandle`](crate::TokioBlockingTaskHandle) when
+///   queued Tokio blocking work must be aborted directly.
 /// * **Compared to
 ///   [`ThreadPerTaskExecutor`](qubit_executor::executor::ThreadPerTaskExecutor)** —
 ///   this type **reuses** Tokio-managed blocking threads (bounded pool) instead
@@ -130,11 +119,12 @@ impl Executor for TokioExecutor {
         R: Send + 'static,
         E: Send + 'static,
     {
-        ensure_tokio_runtime_entered()?;
-        let (handle, slot) = TaskEndpointPair::new().into_tracked_parts();
-        tokio::task::spawn_blocking(move || {
-            TaskRunner::new(task).run(slot);
-        });
-        Ok(handle)
+        ensure_tokio_runtime_entered().map(|()| {
+            let (handle, slot) = TaskEndpointPair::new().into_tracked_parts();
+            tokio::task::spawn_blocking(move || {
+                TaskRunner::new(task).run(slot);
+            });
+            handle
+        })
     }
 }

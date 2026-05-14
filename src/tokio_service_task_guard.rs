@@ -162,12 +162,11 @@ impl TokioServiceTaskGuard {
     /// # Returns
     ///
     /// A callback used by service stop handling when Tokio aborts a queued
-    /// blocking task before its closure starts.
-    pub(crate) fn finish_queued_once_callback(&self) -> impl FnOnce() + Send + 'static {
+    /// blocking task before its closure starts. The callback returns `true`
+    /// only when this call completed queued-task accounting.
+    pub(crate) fn finish_queued_once_callback(&self) -> impl FnOnce() -> bool + Send + 'static {
         let tracker = Arc::clone(&self.tracker);
-        move || {
-            tracker.finish_queued();
-        }
+        move || tracker.finish_queued()
     }
 
     /// Creates a reusable callback that cancels queued-task accounting.

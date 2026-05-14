@@ -40,8 +40,6 @@ impl Drop for TokioIoServiceTaskGuard {
     /// Updates service counters when an async task completes or is aborted.
     fn drop(&mut self) {
         self.state.remove_abort_handle(&self.marker);
-        if self.state.active_tasks.dec() == 0 {
-            self.state.notify_if_terminated();
-        }
+        self.state.active_tasks.dec();
     }
 }

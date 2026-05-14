@@ -77,7 +77,7 @@ async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
 }
 
 #[tokio::test]
-async fn test_tokio_executor_service_stop_waits_for_running_blocking_task() {
+async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_task() {
     let service = TokioExecutorService::new();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
@@ -111,7 +111,7 @@ async fn test_tokio_executor_service_stop_waits_for_running_blocking_task() {
         .expect("blocking task should receive release signal");
     service.wait_termination();
 
-    assert!(report.cancelled >= 1);
+    assert_eq!(report.cancelled, 0);
     assert!(service.is_not_running());
     assert!(service.is_terminated());
     assert_eq!(

@@ -30,7 +30,10 @@ struct TrackedAbortHandle {
     /// Tokio abort handle used by immediate shutdown.
     handle: AbortHandle,
     /// Completion hook used to publish cancellation for result handles.
-    cancel: Box<dyn FnOnce() + Send + 'static>,
+    ///
+    /// The hook returns `true` only when queued-task accounting was actually
+    /// cancelled by the call.
+    cancel: Box<dyn FnOnce() -> bool + Send + 'static>,
 }
 
 /// Number of accepted blocking tasks by scheduler state.
@@ -150,9 +153,11 @@ impl TokioExecutorServiceState {
     ///
     /// * `marker` - Service-local task marker shared with the lifecycle guard.
     /// * `handle` - Tokio abort handle for the accepted task.
+    /// * `cancel` - Hook that publishes queued-task cancellation and reports
+    ///   whether queued service accounting was actually cancelled.
     pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
     where
-        F: FnOnce() + Send + 'static,
+        F: FnOnce() -> bool + Send + 'static,
     {
         let mut handles = self.lock_abort_handles();
         if !handle.is_finished() {
@@ -178,15 +183,16 @@ impl TokioExecutorServiceState {
     ///
     /// # Returns
     ///
-    /// Number of unfinished tasks for which an abort request was sent.
+    /// Number of queued tasks whose service-side accounting was cancelled.
     pub(crate) fn abort_tracked_tasks(&self) -> usize {
         let mut cancellation_count = 0usize;
         let mut handles = self.lock_abort_handles();
         for tracked in handles.drain(..) {
             if !tracked.handle.is_finished() {
                 tracked.handle.abort();
-                (tracked.cancel)();
-                cancellation_count += 1;
+                if (tracked.cancel)() {
+                    cancellation_count += 1;
+                }
             }
         }
         cancellation_count
