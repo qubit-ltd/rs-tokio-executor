@@ -17,6 +17,7 @@ use std::{
 
 use qubit_executor::{
     CancelResult,
+    SubmissionError,
     TaskExecutionError,
 };
 use qubit_tokio_executor::{
@@ -46,6 +47,19 @@ async fn test_tokio_executor_call_returns_future_value() {
         .expect("tokio executor should return callable value");
 
     assert_eq!(value, 42);
+}
+
+#[test]
+fn test_tokio_executor_call_without_runtime_returns_submission_error() {
+    let executor = TokioExecutor;
+
+    let result = std::panic::catch_unwind(|| executor.call(|| Ok::<usize, io::Error>(42)))
+        .expect("tokio executor should not panic without a runtime");
+
+    assert!(matches!(
+        result,
+        Err(SubmissionError::WorkerSpawnFailed { .. })
+    ));
 }
 
 #[tokio::test]

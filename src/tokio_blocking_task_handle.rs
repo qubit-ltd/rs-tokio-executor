@@ -142,8 +142,8 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     pub fn cancel(&self) -> CancelResult {
         let result = self.handle.cancel();
         if result == CancelResult::Cancelled {
-            self.abort_handle.abort();
             (self.cancel_queued_task)();
+            self.abort_handle.abort();
         }
         result
     }

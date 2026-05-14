@@ -19,6 +19,27 @@ use qubit_executor::{
     },
 };
 
+/// Verifies that the current thread is entered into a Tokio runtime.
+///
+/// # Returns
+///
+/// `Ok(())` when Tokio task spawning can use the current runtime.
+///
+/// # Errors
+///
+/// Returns [`SubmissionError::WorkerSpawnFailed`] when no Tokio runtime is
+/// entered on the current thread. Tokio's spawn APIs panic in that state, so
+/// public submission APIs use this helper to reject the task explicitly.
+pub(crate) fn ensure_tokio_runtime_entered() -> Result<(), SubmissionError> {
+    tokio::runtime::Handle::try_current()
+        .map(|_| ())
+        .map_err(|error| {
+            SubmissionError::worker_spawn_failed(std::io::Error::other(format!(
+                "Tokio runtime is not entered: {error}",
+            )))
+        })
+}
+
 /// Executes callable tasks on Tokio's blocking task pool.
 ///
 /// `TokioExecutor` implements [`Executor`] by submitting work to Tokio's
@@ -32,8 +53,8 @@ use qubit_executor::{
 ///   runs (for example inside an `async` block executed under
 ///   [`Runtime::block_on`](tokio::runtime::Runtime::block_on) or
 ///   [`#[tokio::main]`](https://docs.rs/tokio/latest/tokio/attr.main.html)).
-///   Calling `call` first and only then entering a runtime is wrong: the
-///   blocking task was submitted with **no** runtime at `call` time.
+///   Calling `call` first and only then entering a runtime is rejected with
+///   [`SubmissionError::WorkerSpawnFailed`].
 /// * **Any normal Tokio entry point works** — you are **not** restricted to
 ///   [`Builder::new_current_thread`](tokio::runtime::Builder::new_current_thread);
 ///   a multi-thread [`Runtime`](tokio::runtime::Runtime) or an async handler in
@@ -98,14 +119,18 @@ impl Executor for TokioExecutor {
     /// # Returns
     ///
     /// A tracked task handle for the accepted callable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubmissionError::WorkerSpawnFailed`] when the current thread
+    /// is not entered into a Tokio runtime.
     fn call<C, R, E>(&self, task: C) -> Result<TrackedTask<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
         E: Send + 'static,
     {
-        // `spawn_blocking` runs now and requires `Handle::current()` — caller must
-        // already be inside a Tokio runtime (see struct-level documentation).
+        ensure_tokio_runtime_entered()?;
         let (handle, slot) = TaskEndpointPair::new().into_tracked_parts();
         tokio::task::spawn_blocking(move || {
             TaskRunner::new(task).run(slot);

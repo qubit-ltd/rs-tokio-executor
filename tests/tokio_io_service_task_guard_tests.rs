@@ -9,6 +9,5 @@ async fn test_tokio_io_service_task_guard_notifies_termination_when_future_finis
 
     service.shutdown();
     assert_eq!("ok", handle.await.unwrap());
-    service.await_termination().await;
     assert!(service.is_terminated());
 }

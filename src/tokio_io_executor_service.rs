@@ -9,13 +9,13 @@
  ******************************************************************************/
 use std::{
     future::Future,
-    pin::Pin,
     sync::Arc,
 };
 
 use qubit_executor::TaskExecutionError;
 
 use crate::TokioTaskHandle;
+use crate::tokio_executor::ensure_tokio_runtime_entered;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
 use qubit_executor::service::{
@@ -58,7 +58,9 @@ impl TokioIoExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted.
+    /// requested before the task is accepted. Returns
+    /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
+    /// entered into a Tokio runtime.
     pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
@@ -69,6 +71,7 @@ impl TokioIoExecutorService {
         if self.state.is_not_running() {
             return Err(SubmissionError::Shutdown);
         }
+        ensure_tokio_runtime_entered()?;
         self.state.active_tasks.inc();
 
         let marker = Arc::new(());
@@ -169,26 +172,5 @@ impl TokioIoExecutorService {
     #[inline]
     pub fn is_terminated(&self) -> bool {
         self.lifecycle() == ExecutorServiceLifecycle::Terminated
-    }
-
-    /// Waits until the service has terminated.
-    ///
-    /// # Returns
-    ///
-    /// A future that resolves after shutdown has been requested and all
-    /// accepted async tasks have finished or been aborted.
-    pub fn await_termination(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            let notified = self.state.terminated_notify.notified();
-            tokio::pin!(notified);
-            loop {
-                notified.as_mut().enable();
-                if self.is_terminated() {
-                    return;
-                }
-                notified.as_mut().await;
-                notified.set(self.state.terminated_notify.notified());
-            }
-        })
     }
 }
