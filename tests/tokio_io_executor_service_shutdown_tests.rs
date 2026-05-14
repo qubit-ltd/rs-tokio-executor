@@ -29,7 +29,7 @@ async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
 }
 
 #[tokio::test]
-async fn test_tokio_io_executor_service_await_termination_waits_for_tasks() {
+async fn test_tokio_io_executor_service_shutdown_waits_for_task_handles() {
     let service = TokioIoExecutorService::new();
 
     let handle = service
@@ -40,8 +40,6 @@ async fn test_tokio_io_executor_service_await_termination_waits_for_tasks() {
         .expect("service should accept task");
 
     service.shutdown();
-    service.await_termination().await;
-
     handle.await.expect("task should complete successfully");
     assert!(service.is_not_running());
     assert!(service.is_terminated());
@@ -60,12 +58,11 @@ async fn test_tokio_io_executor_service_stop_aborts_running_task_handle() {
 
     tokio::task::yield_now().await;
     let report = service.stop();
-    service.await_termination().await;
 
     assert!(report.cancelled >= 1);
+    assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
     assert!(service.is_not_running());
     assert!(service.is_terminated());
-    assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
 }
 
 #[tokio::test]
@@ -79,7 +76,6 @@ async fn test_tokio_io_executor_service_stop_ignores_completed_tasks() {
         .expect("task should complete successfully");
 
     let report = service.stop();
-    service.await_termination().await;
 
     assert_eq!(report.running, 0);
     assert_eq!(report.cancelled, 0);
@@ -109,7 +105,7 @@ async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
         handle.await,
         Err(TaskExecutionError::Cancelled) | Err(TaskExecutionError::Panicked) | Ok(())
     ));
-    service.await_termination().await;
+    assert!(service.is_terminated());
 }
 
 #[tokio::test]
@@ -133,19 +129,13 @@ async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_t
         .expect("quick task should complete successfully");
 
     service.shutdown();
-    let termination_result = tokio::time::timeout(
-        std::time::Duration::from_millis(50),
-        service.await_termination(),
-    )
-    .await;
 
-    assert!(termination_result.is_err());
+    assert!(!service.is_terminated());
     release_tx
         .send(())
         .expect("pending task should receive release signal");
     pending_handle
         .await
         .expect("pending task should complete successfully");
-    service.await_termination().await;
     assert!(service.is_terminated());
 }

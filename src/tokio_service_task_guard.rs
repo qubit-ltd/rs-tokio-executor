@@ -104,6 +104,16 @@ impl TokioServiceTaskTracker {
         }
     }
 
+    /// Removes this task from abort tracking and finishes queued accounting.
+    ///
+    /// # Returns
+    ///
+    /// `true` if queued-task accounting was completed by this call.
+    pub(crate) fn cancel_queued(&self) -> bool {
+        self.state.remove_abort_handle(&self.marker);
+        self.finish_queued()
+    }
+
     /// Finishes this task from its current accounting state.
     pub(crate) fn finish(&self) {
         match self.task_state.swap(TASK_STATE_FINISHED, Ordering::AcqRel) {
@@ -160,16 +170,17 @@ impl TokioServiceTaskGuard {
         }
     }
 
-    /// Creates a reusable callback that finishes queued-task accounting.
+    /// Creates a reusable callback that cancels queued-task accounting.
     ///
     /// # Returns
     ///
-    /// A callback used by tracked task handles when user cancellation wins
-    /// before the blocking closure starts.
-    pub(crate) fn finish_queued_callback(&self) -> impl Fn() + Send + Sync + 'static {
+    /// A callback used by tracked task handles when user cancellation wins.
+    /// It removes the service abort handle before finishing queued accounting
+    /// so later service stops do not count the same task again.
+    pub(crate) fn cancel_queued_callback(&self) -> impl Fn() + Send + Sync + 'static {
         let tracker = Arc::clone(&self.tracker);
         move || {
-            tracker.finish_queued();
+            tracker.cancel_queued();
         }
     }
 }

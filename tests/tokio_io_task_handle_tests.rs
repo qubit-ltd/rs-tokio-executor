@@ -31,7 +31,7 @@ async fn test_tokio_io_task_handle_cancel_requests_abort() {
     assert!(handle.is_done());
     assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
     service.shutdown();
-    service.await_termination().await;
+    assert!(service.is_terminated());
 }
 
 #[tokio::test]
@@ -54,7 +54,7 @@ async fn test_tokio_io_task_handle_cancel_reports_already_finished() {
         .await
         .expect("finished task should still report success");
     service.shutdown();
-    service.await_termination().await;
+    assert!(service.is_terminated());
 }
 
 #[tokio::test]
@@ -71,5 +71,5 @@ async fn test_tokio_io_task_handle_reports_panicked_task() {
 
     assert!(matches!(handle.await, Err(TaskExecutionError::Panicked)));
     service.shutdown();
-    service.await_termination().await;
+    assert!(service.is_terminated());
 }

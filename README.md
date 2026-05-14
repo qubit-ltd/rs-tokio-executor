@@ -43,7 +43,7 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 
 If a method internally uses `tokio::spawn` or `tokio::task::spawn_blocking`, it
 must be called while a Tokio runtime is entered. Calling it without a runtime is
-a Tokio usage error.
+rejected with `SubmissionError::WorkerSpawnFailed`.
 
 ## Blocking vs IO Tasks
 
@@ -66,11 +66,19 @@ tasks. Async IO submissions use `TokioTaskHandle` because they wrap Tokio
 
 `shutdown` rejects new tasks and lets accepted tasks finish. `stop`
 rejects new tasks and requests cancellation or abort for tracked Tokio tasks.
-Async IO tasks are aborted through Tokio abort handles. Blocking tasks submitted
-through Tokio can be cancelled only before their blocking closure starts. Queued
-tracked blocking tasks are removed from service accounting immediately after
-successful cancellation; already running blocking code cannot be forcibly
-stopped by Rust, and service termination waits for that code to return.
+Async IO task cancellation sends a best-effort Tokio abort request;
+`CancelResult::Cancelled` means the request was sent, and the final outcome is
+the result produced by awaiting the returned `TokioTaskHandle`. Blocking tasks
+submitted through Tokio can be cancelled only before their blocking closure
+starts. Queued tracked blocking tasks are removed from service accounting
+immediately after successful cancellation; already running blocking code cannot
+be forcibly stopped by Rust, and service termination waits for that code to
+return.
+
+`TokioExecutorService` exposes both blocking `wait_termination` and async
+`await_termination` service-level waiting. `TokioIoExecutorService` intentionally
+does not expose service-level async waiting; await the task handles returned by
+`spawn` when the caller needs to observe async task completion.
 
 ## Quick Start
 
@@ -106,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
     assert_eq!(handle.await?, 42);
     service.shutdown();
-    service.await_termination().await;
+    assert!(service.is_terminated());
 
     Ok(())
 }

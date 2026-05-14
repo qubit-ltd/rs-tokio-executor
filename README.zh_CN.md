@@ -35,7 +35,7 @@ qubit-tokio-executor = "0.4.0"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
-如果某个方法内部使用 `tokio::spawn` 或 `tokio::task::spawn_blocking`，则调用它时必须已经进入 Tokio runtime。没有 runtime 时调用属于 Tokio 使用错误。
+如果某个方法内部使用 `tokio::spawn` 或 `tokio::task::spawn_blocking`，则调用它时必须已经进入 Tokio runtime。没有 runtime 时调用会返回 `SubmissionError::WorkerSpawnFailed`。
 
 ## Blocking 与 IO 任务
 
@@ -47,7 +47,9 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 
 `submit` 或 `spawn` 成功只表示服务接受了任务。Blocking callable 提交通过共享的 `TaskHandle` 报告结果；tracked blocking 提交返回 `TokioBlockingTaskHandle`，它把共享 tracked-task 状态与 Tokio abort handle 结合起来，用于处理 queued blocking 任务。Async IO 提交使用 `TokioTaskHandle`，因为它直接包装 Tokio `JoinHandle`。
 
-`shutdown` 拒绝新任务，并允许已接受任务完成。`stop` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务通过 Tokio abort handle 中止；通过 Tokio 提交的 blocking 任务只能在 blocking 闭包开始前取消。Queued tracked blocking 任务取消成功后会立即从 service 计数中移除；已经运行的 blocking 代码不能被 Rust 强制停止，服务终止会等待这些代码返回。
+`shutdown` 拒绝新任务，并允许已接受任务完成。`stop` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务取消会发送 best-effort Tokio abort 请求；`CancelResult::Cancelled` 只表示请求已发出，最终结果以 await 返回的 `TokioTaskHandle` 为准。通过 Tokio 提交的 blocking 任务只能在 blocking 闭包开始前取消。Queued tracked blocking 任务取消成功后会立即从 service 计数中移除；已经运行的 blocking 代码不能被 Rust 强制停止，服务终止会等待这些代码返回。
+
+`TokioExecutorService` 同时提供阻塞式 `wait_termination` 和异步 `await_termination` service-level 等待。`TokioIoExecutorService` 有意不提供 service-level 异步等待；调用方需要观察 async 任务完成时，应 await `spawn` 返回的 task handle。
 
 ## 快速开始
 
@@ -83,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
     assert_eq!(handle.await?, 42);
     service.shutdown();
-    service.await_termination().await;
+    assert!(service.is_terminated());
 
     Ok(())
 }

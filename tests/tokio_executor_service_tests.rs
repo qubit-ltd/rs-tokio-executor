@@ -1,4 +1,7 @@
-use std::io;
+use std::{
+    io,
+    panic::AssertUnwindSafe,
+};
 
 use qubit_tokio_executor::{
     ExecutorService,
@@ -56,6 +59,26 @@ fn test_tokio_executor_service_rejects_callable_submissions_after_shutdown() {
 
     let tracked = service.submit_tracked_callable(|| Ok::<_, io::Error>(2));
     assert!(matches!(tracked, Err(SubmissionError::Shutdown)));
+}
+
+#[test]
+fn test_tokio_executor_service_submit_without_runtime_returns_submission_error() {
+    let service = TokioExecutorService::new();
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        service.submit_callable(|| Ok::<usize, io::Error>(42))
+    }))
+    .expect("tokio executor service should not panic without a runtime");
+
+    assert!(matches!(
+        result,
+        Err(SubmissionError::WorkerSpawnFailed { .. })
+    ));
+    assert!(service.is_running());
+
+    service.shutdown();
+    service.wait_termination();
+    assert!(service.is_terminated());
 }
 
 #[tokio::test]

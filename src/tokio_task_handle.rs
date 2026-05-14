@@ -57,11 +57,12 @@ impl<R, E> TokioTaskHandle<R, E> {
         Self { handle }
     }
 
-    /// Requests cancellation of the underlying Tokio task.
+    /// Sends a best-effort abort request to the underlying Tokio task.
     ///
-    /// For blocking tasks submitted through `spawn_blocking`, Tokio can prevent
-    /// execution only if the task has not started yet. Already running blocking
-    /// work continues until the closure returns.
+    /// `CancelResult::Cancelled` means this handle requested Tokio abort for a
+    /// task that was not observed as finished at the instant of the check.
+    /// Completion may still win the race with cancellation, so the final task
+    /// outcome is always the value produced by awaiting this handle.
     ///
     /// # Returns
     ///

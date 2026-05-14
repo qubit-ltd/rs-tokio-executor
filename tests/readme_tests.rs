@@ -59,3 +59,34 @@ fn test_readmes_do_not_reference_removed_api_names() {
         assert!(!readme.contains("TokioExecution"));
     }
 }
+
+/// Ensures only the blocking service documents service-level async termination.
+#[test]
+fn test_readmes_limit_await_termination_to_blocking_service() {
+    let readme_en = read_project_file("README.md");
+    let readme_zh = read_project_file("README.zh_CN.md");
+
+    for readme in [&readme_en, &readme_zh] {
+        assert_eq!(
+            1,
+            readme.matches("service.await_termination().await").count()
+        );
+    }
+}
+
+/// Ensures the async IO service no longer exposes service-level async waiting.
+#[test]
+fn test_tokio_io_executor_service_does_not_expose_await_termination() {
+    let source = read_project_file("src/tokio_io_executor_service.rs");
+
+    assert!(!source.contains("pub fn await_termination"));
+}
+
+/// Ensures async task cancellation documentation describes abort-request semantics.
+#[test]
+fn test_tokio_task_handle_docs_describe_abort_request_semantics() {
+    let source = read_project_file("src/tokio_task_handle.rs");
+
+    assert!(source.contains("best-effort abort request"));
+    assert!(!source.contains("For blocking tasks submitted through `spawn_blocking`"));
+}
