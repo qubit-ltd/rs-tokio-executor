@@ -15,7 +15,7 @@ use std::sync::{
 };
 
 use qubit_executor::service::ExecutorServiceLifecycle;
-use qubit_lock::Monitor;
+use qubit_lock::ParkingLotMonitor;
 use tokio::{
     sync::Notify,
     task::AbortHandle,
@@ -85,7 +85,7 @@ pub(crate) struct TokioExecutorServiceState {
     /// Stored lifecycle state before derived termination.
     lifecycle: AtomicU8,
     /// Accepted blocking task counts and synchronous termination monitor.
-    task_counts: Monitor<TokioExecutorTaskCounts>,
+    task_counts: ParkingLotMonitor<TokioExecutorTaskCounts>,
     /// Serializes task submission and shutdown transitions.
     submission_lock: Mutex<()>,
     /// Abort handles for tasks accepted by this service.
