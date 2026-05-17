@@ -36,16 +36,33 @@ fn package_version() -> String {
         .to_owned()
 }
 
-/// Ensures README dependency snippets match the crate package version.
+/// Ensures README dependency snippets use the crate package major.minor line.
 #[test]
 fn test_readmes_use_current_crate_version() {
     let version = package_version();
-    let dependency = format!("qubit-tokio-executor = \"{version}\"");
+    let minor_version = minor_series(&version).expect("package version should have major.minor");
+    let dependency = format!("qubit-tokio-executor = \"{minor_version}\"");
     let readme_en = read_project_file("README.md");
     let readme_zh = read_project_file("README.zh_CN.md");
 
     assert!(readme_en.contains(&dependency));
     assert!(readme_zh.contains(&dependency));
+}
+
+/// Returns `major.minor` from a semver string.
+///
+/// # Parameters
+///
+/// * `version` - Package version from `Cargo.toml`.
+///
+/// # Returns
+///
+/// The two-component version requirement used in README dependency examples.
+fn minor_series(version: &str) -> Option<String> {
+    let mut parts = version.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    Some(format!("{major}.{minor}"))
 }
 
 /// Ensures READMEs no longer document removed or renamed APIs.
