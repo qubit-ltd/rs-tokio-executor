@@ -35,10 +35,7 @@ async fn test_tokio_blocking_executor_service_alias_runs_blocking_callable() {
         .submit_callable(|| Ok::<usize, io::Error>(42))
         .expect("service should accept callable");
 
-    assert_eq!(
-        handle.await.expect("callable should complete successfully"),
-        42
-    );
+    assert_eq!(handle.await.expect("callable should complete successfully"), 42);
     service.shutdown();
     service.wait_termination();
 }
@@ -63,9 +60,7 @@ async fn test_tokio_blocking_task_handle_try_get_reports_pending_then_ready() {
 
     let handle = service
         .submit_tracked_callable(move || {
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            release_rx.recv().expect("blocking task should receive release signal");
             Ok::<usize, io::Error>(7)
         })
         .expect("service should accept tracked callable");
@@ -108,12 +103,8 @@ fn test_tokio_blocking_task_handle_status_and_tracked_trait_cancel() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
         });
         started_rx
             .recv_timeout(Duration::from_secs(1))

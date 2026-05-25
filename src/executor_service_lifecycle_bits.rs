@@ -22,8 +22,7 @@ pub(crate) fn load(lifecycle: &AtomicU8) -> ExecutorServiceLifecycle {
 /// Transitions a running service to graceful shutdown.
 pub(crate) fn shutdown(lifecycle: &AtomicU8) {
     let _ = lifecycle.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-        (from_u8(current) == ExecutorServiceLifecycle::Running)
-            .then_some(ExecutorServiceLifecycle::ShuttingDown as u8)
+        (from_u8(current) == ExecutorServiceLifecycle::Running).then_some(ExecutorServiceLifecycle::ShuttingDown as u8)
     });
 }
 

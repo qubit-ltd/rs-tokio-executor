@@ -135,8 +135,7 @@ impl TokioExecutorService {
             task();
         });
         let abort_handle = join_handle.abort_handle();
-        self.state
-            .register_abort_handle(marker, abort_handle.clone(), cancel);
+        self.state.register_abort_handle(marker, abort_handle.clone(), cancel);
         drop(submission_guard);
         abort_handle
     }
@@ -250,10 +249,7 @@ impl ExecutorService for TokioExecutorService {
     /// requested before the task is accepted. Returns
     /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
     /// entered into a Tokio runtime.
-    fn submit_tracked_callable<C, R, E>(
-        &self,
-        task: C,
-    ) -> Result<Self::TrackedHandle<R, E>, SubmissionError>
+    fn submit_tracked_callable<C, R, E>(&self, task: C) -> Result<Self::TrackedHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
@@ -277,11 +273,7 @@ impl ExecutorService for TokioExecutorService {
             },
             move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
         );
-        Ok(TokioBlockingTaskHandle::new(
-            handle,
-            abort_handle,
-            cancel_queued_task,
-        ))
+        Ok(TokioBlockingTaskHandle::new(handle, abort_handle, cancel_queued_task))
     }
 
     /// Stops accepting new tasks.

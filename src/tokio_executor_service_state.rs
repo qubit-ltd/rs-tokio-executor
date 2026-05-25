@@ -113,8 +113,7 @@ impl TokioExecutorServiceState {
 
     /// Moves a task from queued to running.
     pub(crate) fn mark_task_started(&self) {
-        self.task_counts
-            .write(TokioExecutorTaskCounts::mark_started);
+        self.task_counts.write(TokioExecutorTaskCounts::mark_started);
     }
 
     /// Records task completion or queued-task abortion.
@@ -139,8 +138,7 @@ impl TokioExecutorServiceState {
     /// A tuple whose first element is the queued count and second element is
     /// the running count.
     pub(crate) fn task_count_snapshot(&self) -> (usize, usize) {
-        self.task_counts
-            .read(|counts| (counts.queued, counts.running))
+        self.task_counts.read(|counts| (counts.queued, counts.running))
     }
 
     /// Registers an abort handle if the task has not already finished.
@@ -210,10 +208,8 @@ impl TokioExecutorServiceState {
 
     /// Blocks until the service has reached termination.
     pub(crate) fn wait_termination(&self) {
-        self.task_counts.wait_until(
-            |counts| self.is_not_running() && counts.is_empty(),
-            |_counts| {},
-        );
+        self.task_counts
+            .wait_until(|counts| self.is_not_running() && counts.is_empty(), |_counts| {});
     }
 
     /// Wakes both synchronous and asynchronous termination waiters.

@@ -115,9 +115,7 @@ async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_t
 
     let pending_handle = service
         .spawn(async move {
-            release_rx
-                .await
-                .expect("pending task should receive release signal");
+            release_rx.await.expect("pending task should receive release signal");
             Ok::<(), io::Error>(())
         })
         .expect("service should accept pending task");
@@ -131,11 +129,7 @@ async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_t
     service.shutdown();
 
     assert!(!service.is_terminated());
-    release_tx
-        .send(())
-        .expect("pending task should receive release signal");
-    pending_handle
-        .await
-        .expect("pending task should complete successfully");
+    release_tx.send(()).expect("pending task should receive release signal");
+    pending_handle.await.expect("pending task should complete successfully");
     assert!(service.is_terminated());
 }

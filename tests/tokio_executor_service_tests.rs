@@ -70,10 +70,7 @@ fn test_tokio_executor_service_submit_without_runtime_returns_submission_error()
     }))
     .expect("tokio executor service should not panic without a runtime");
 
-    assert!(matches!(
-        result,
-        Err(SubmissionError::WorkerSpawnFailed { .. })
-    ));
+    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
     assert!(service.is_running());
 
     service.shutdown();

@@ -187,9 +187,7 @@ impl TokioServiceTaskGuard {
 impl Drop for TokioServiceTaskGuard {
     /// Updates service counters when a task completes or is aborted.
     fn drop(&mut self) {
-        self.tracker
-            .state
-            .remove_abort_handle(self.tracker.marker());
+        self.tracker.state.remove_abort_handle(self.tracker.marker());
         self.tracker.finish();
     }
 }

@@ -50,9 +50,7 @@ async fn test_tokio_io_task_handle_cancel_reports_already_finished() {
     .expect("task should finish promptly");
 
     assert_eq!(CancelResult::AlreadyFinished, handle.cancel());
-    handle
-        .await
-        .expect("finished task should still report success");
+    handle.await.expect("finished task should still report success");
     service.shutdown();
     assert!(service.is_terminated());
 }
