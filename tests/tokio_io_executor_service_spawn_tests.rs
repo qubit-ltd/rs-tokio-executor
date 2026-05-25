@@ -40,10 +40,5 @@ async fn test_tokio_io_executor_service_spawn_returns_value() {
         .spawn(async { Ok::<usize, io::Error>(42) })
         .expect("service should accept async callable");
 
-    assert_eq!(
-        handle
-            .await
-            .expect("async callable should complete successfully"),
-        42,
-    );
+    assert_eq!(handle.await.expect("async callable should complete successfully"), 42,);
 }

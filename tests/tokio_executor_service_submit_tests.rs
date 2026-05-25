@@ -49,8 +49,5 @@ async fn test_tokio_executor_service_submit_callable_returns_value() {
         .submit_callable(ok_usize_task as fn() -> Result<usize, io::Error>)
         .expect("service should accept the callable");
 
-    assert_eq!(
-        handle.await.expect("callable should complete successfully"),
-        42,
-    );
+    assert_eq!(handle.await.expect("callable should complete successfully"), 42,);
 }

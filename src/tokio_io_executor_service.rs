@@ -93,8 +93,7 @@ impl TokioIoExecutorService {
             let _guard = guard;
             future.await.map_err(TaskExecutionError::Failed)
         });
-        self.state
-            .register_abort_handle(marker, handle.abort_handle());
+        self.state.register_abort_handle(marker, handle.abort_handle());
         drop(submission_guard);
         Ok(TokioTaskHandle::new(handle))
     }

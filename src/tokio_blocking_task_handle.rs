@@ -58,11 +58,7 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     ///
     /// A tracked Tokio blocking task handle.
     #[inline]
-    pub(crate) fn new<F>(
-        handle: TrackedTask<R, E>,
-        abort_handle: AbortHandle,
-        cancel_queued_task: F,
-    ) -> Self
+    pub(crate) fn new<F>(handle: TrackedTask<R, E>, abort_handle: AbortHandle, cancel_queued_task: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {

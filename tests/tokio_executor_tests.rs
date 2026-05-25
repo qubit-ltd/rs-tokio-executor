@@ -56,10 +56,7 @@ fn test_tokio_executor_call_without_runtime_returns_submission_error() {
     let result = std::panic::catch_unwind(|| executor.call(|| Ok::<usize, io::Error>(42)))
         .expect("tokio executor should not panic without a runtime");
 
-    assert!(matches!(
-        result,
-        Err(SubmissionError::WorkerSpawnFailed { .. })
-    ));
+    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
 }
 
 #[tokio::test]
@@ -89,12 +86,8 @@ fn test_tokio_executor_cancel_queued_blocking_task_reports_cancelled() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
         });
         started_rx
             .recv_timeout(Duration::from_secs(1))

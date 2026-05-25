@@ -84,9 +84,6 @@ fn test_readmes_limit_await_termination_to_blocking_service() {
     let readme_zh = read_project_file("README.zh_CN.md");
 
     for readme in [&readme_en, &readme_zh] {
-        assert_eq!(
-            1,
-            readme.matches("service.await_termination().await").count()
-        );
+        assert_eq!(1, readme.matches("service.await_termination().await").count());
     }
 }

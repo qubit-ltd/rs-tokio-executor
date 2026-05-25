@@ -55,12 +55,8 @@ fn test_tokio_task_handle_cancel_aborts_queued_blocking_task() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
         });
         started_rx
             .recv_timeout(Duration::from_secs(1))
@@ -84,9 +80,7 @@ fn test_tokio_task_handle_cancel_aborts_queued_blocking_task() {
         let waiter_service = service.clone();
         let waiter = std::thread::spawn(move || {
             waiter_service.wait_termination();
-            terminated_tx
-                .send(())
-                .expect("test should receive termination signal");
+            terminated_tx.send(()).expect("test should receive termination signal");
         });
         if terminated_rx.recv_timeout(Duration::from_millis(100)).is_err() {
             release_tx
@@ -120,12 +114,8 @@ fn test_tokio_task_handle_cancel_then_stop_does_not_count_cancel_twice() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
         });
         started_rx
             .recv_timeout(Duration::from_secs(1))
@@ -165,12 +155,8 @@ fn test_tokio_task_handle_cancel_allows_termination_before_queued_closure_runs()
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
         });
         started_rx
             .recv_timeout(Duration::from_secs(1))
@@ -225,9 +211,7 @@ async fn test_tokio_task_handle_panicked_is_not_cancelled() {
         .submit_tracked(|| -> Result<(), io::Error> { panic!("tokio service panic") })
         .expect("service should accept panicking task");
 
-    let error = handle
-        .await
-        .expect_err("panicked task should return execution error");
+    let error = handle.await.expect_err("panicked task should return execution error");
     assert!(error.is_panicked());
     assert!(!error.is_cancelled());
     service.shutdown();
