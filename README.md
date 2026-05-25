@@ -37,7 +37,7 @@ Tokio runtime features you need in `Cargo.toml`:
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.7"
+qubit-tokio-executor = "0.8"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
