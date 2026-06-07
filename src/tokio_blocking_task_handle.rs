@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::future::IntoFuture;
 
 use qubit_executor::task::TaskHandleFuture;
@@ -38,7 +36,8 @@ type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 pub struct TokioBlockingTaskHandle<R, E> {
     /// Standard tracked task endpoint used for result and status observation.
     handle: TrackedTask<R, E>,
-    /// Tokio abort handle used to remove queued blocking work after cancellation.
+    /// Tokio abort handle used to remove queued blocking work after
+    /// cancellation.
     abort_handle: AbortHandle,
     /// Callback that completes queued-task accounting after cancellation wins.
     cancel_queued_task: CancelQueuedTask,
@@ -51,14 +50,18 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     ///
     /// * `handle` - Standard tracked task endpoint.
     /// * `abort_handle` - Tokio abort handle for the submitted blocking task.
-    /// * `cancel_queued_task` - Callback that finishes service-side queued
-    ///   task accounting when cancellation wins before the task starts.
+    /// * `cancel_queued_task` - Callback that finishes service-side queued task
+    ///   accounting when cancellation wins before the task starts.
     ///
     /// # Returns
     ///
     /// A tracked Tokio blocking task handle.
     #[inline]
-    pub(crate) fn new<F>(handle: TrackedTask<R, E>, abort_handle: AbortHandle, cancel_queued_task: F) -> Self
+    pub(crate) fn new<F>(
+        handle: TrackedTask<R, E>,
+        abort_handle: AbortHandle,
+        cancel_queued_task: F,
+    ) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
@@ -127,8 +130,8 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// Attempts to cancel this task before its blocking closure starts.
     ///
     /// When cancellation wins the pending-state race, this method also aborts
-    /// the Tokio `spawn_blocking` task so queued work is dropped without waiting
-    /// for an available blocking thread.
+    /// the Tokio `spawn_blocking` task so queued work is dropped without
+    /// waiting for an available blocking thread.
     ///
     /// # Returns
     ///

@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::sync::{
     Arc,
     Mutex,
@@ -90,7 +88,8 @@ pub(crate) struct TokioExecutorServiceState {
     submission_lock: Mutex<()>,
     /// Abort handles for tasks accepted by this service.
     abort_handles: Mutex<Vec<TrackedAbortHandle>>,
-    /// Notifies waiters once shutdown has completed and no tasks remain active.
+    /// Notifies waiters once shutdown has completed and no tasks remain
+    /// active.
     pub(crate) terminated_notify: Notify,
 }
 
@@ -113,7 +112,8 @@ impl TokioExecutorServiceState {
 
     /// Moves a task from queued to running.
     pub(crate) fn mark_task_started(&self) {
-        self.task_counts.write(TokioExecutorTaskCounts::mark_started);
+        self.task_counts
+            .write(TokioExecutorTaskCounts::mark_started);
     }
 
     /// Records task completion or queued-task abortion.
@@ -138,7 +138,8 @@ impl TokioExecutorServiceState {
     /// A tuple whose first element is the queued count and second element is
     /// the running count.
     pub(crate) fn task_count_snapshot(&self) -> (usize, usize) {
-        self.task_counts.read(|counts| (counts.queued, counts.running))
+        self.task_counts
+            .read(|counts| (counts.queued, counts.running))
     }
 
     /// Registers an abort handle if the task has not already finished.
@@ -153,8 +154,12 @@ impl TokioExecutorServiceState {
     /// * `handle` - Tokio abort handle for the accepted task.
     /// * `cancel` - Hook that publishes queued-task cancellation and reports
     ///   whether queued service accounting was actually cancelled.
-    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
-    where
+    pub(crate) fn register_abort_handle<F>(
+        &self,
+        marker: Arc<()>,
+        handle: AbortHandle,
+        cancel: F,
+    ) where
         F: FnOnce() -> bool + Send + 'static,
     {
         let mut handles = self.lock_abort_handles();
@@ -208,8 +213,10 @@ impl TokioExecutorServiceState {
 
     /// Blocks until the service has reached termination.
     pub(crate) fn wait_termination(&self) {
-        self.task_counts
-            .wait_until(|counts| self.is_not_running() && counts.is_empty(), |_counts| {});
+        self.task_counts.wait_until(
+            |counts| self.is_not_running() && counts.is_empty(),
+            |_counts| {},
+        );
     }
 
     /// Wakes both synchronous and asynchronous termination waiters.
@@ -232,7 +239,8 @@ impl TokioExecutorServiceState {
     /// Returns the observed lifecycle state.
     pub(crate) fn lifecycle(&self) -> ExecutorServiceLifecycle {
         let lifecycle = executor_service_lifecycle_bits::load(&self.lifecycle);
-        let has_no_tasks = self.task_counts.read(TokioExecutorTaskCounts::is_empty);
+        let has_no_tasks =
+            self.task_counts.read(TokioExecutorTaskCounts::is_empty);
         if lifecycle != ExecutorServiceLifecycle::Running && has_no_tasks {
             ExecutorServiceLifecycle::Terminated
         } else {
@@ -242,7 +250,8 @@ impl TokioExecutorServiceState {
 
     /// Returns whether shutdown or stop has been requested.
     pub(crate) fn is_not_running(&self) -> bool {
-        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
+        executor_service_lifecycle_bits::load(&self.lifecycle)
+            != ExecutorServiceLifecycle::Running
     }
 
     /// Marks the service as shutting down.

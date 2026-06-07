@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::sync::{
     Arc,
     Mutex,
@@ -41,8 +39,12 @@ pub fn share_task_slot<R, E>(slot: TaskSlot<R, E>) -> SharedTaskSlot<R, E> {
 /// # Returns
 ///
 /// `Some(TaskSlot)` if this call won the slot ownership race, otherwise `None`.
-pub fn take_task_slot<R, E>(slot: &SharedTaskSlot<R, E>) -> Option<TaskSlot<R, E>> {
-    slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+pub fn take_task_slot<R, E>(
+    slot: &SharedTaskSlot<R, E>,
+) -> Option<TaskSlot<R, E>> {
+    slot.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
 }
 
 /// Cancels an unstarted task slot if queued service accounting is still active.
@@ -59,13 +61,17 @@ pub fn take_task_slot<R, E>(slot: &SharedTaskSlot<R, E>) -> Option<TaskSlot<R, E
 /// # Returns
 ///
 /// `true` if queued service accounting was completed by this call.
-pub fn cancel_unstarted_task_slot_if_queued<R, E, F>(slot: &SharedTaskSlot<R, E>, finish_queued: F) -> bool
+pub fn cancel_unstarted_task_slot_if_queued<R, E, F>(
+    slot: &SharedTaskSlot<R, E>,
+    finish_queued: F,
+) -> bool
 where
     F: FnOnce() -> bool,
 {
     finish_queued()
         .then(|| {
-            let _cancelled = take_task_slot(slot).map(TaskSlot::cancel_unstarted);
+            let _cancelled =
+                take_task_slot(slot).map(TaskSlot::cancel_unstarted);
         })
         .is_some()
 }

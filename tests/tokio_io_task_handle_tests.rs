@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::io;
 
 use qubit_executor::{
@@ -50,7 +48,9 @@ async fn test_tokio_io_task_handle_cancel_reports_already_finished() {
     .expect("task should finish promptly");
 
     assert_eq!(CancelResult::AlreadyFinished, handle.cancel());
-    handle.await.expect("finished task should still report success");
+    handle
+        .await
+        .expect("finished task should still report success");
     service.shutdown();
     assert!(service.is_terminated());
 }

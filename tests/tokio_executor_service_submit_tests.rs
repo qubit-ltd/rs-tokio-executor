@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::io;
 
 use qubit_executor::{
@@ -35,9 +33,9 @@ async fn test_tokio_executor_service_submit_acceptance_is_not_task_success() {
         .submit_tracked(|| Err::<(), _>(io::Error::other("task failed")))
         .expect("service should accept the runnable");
 
-    let err = handle
-        .await
-        .expect_err("accepted runnable should report task failure through handle");
+    let err = handle.await.expect_err(
+        "accepted runnable should report task failure through handle",
+    );
     assert!(matches!(err, TaskExecutionError::Failed(_)));
 }
 
@@ -49,5 +47,8 @@ async fn test_tokio_executor_service_submit_callable_returns_value() {
         .submit_callable(ok_usize_task as fn() -> Result<usize, io::Error>)
         .expect("service should accept the callable");
 
-    assert_eq!(handle.await.expect("callable should complete successfully"), 42,);
+    assert_eq!(
+        handle.await.expect("callable should complete successfully"),
+        42,
+    );
 }

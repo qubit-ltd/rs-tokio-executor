@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use qubit_function::Callable;
 
 use qubit_executor::{
@@ -44,27 +42,28 @@ use crate::tokio_runtime::ensure_tokio_runtime_entered;
 ///   [`TrackedTask`] implements [`IntoFuture`](std::future::IntoFuture), so it
 ///   can be awaited inside a Tokio-driven async context after submission
 ///   succeeds.
-/// * **Blocking pool** — the closure runs on Tokio's *blocking* thread pool, not
-///   on the core async worker threads, so heavy synchronous work does not
+/// * **Blocking pool** — the closure runs on Tokio's *blocking* thread pool,
+///   not on the core async worker threads, so heavy synchronous work does not
 ///   starve other async tasks on the runtime.
-/// * **Standard tracked-task cancellation** — the returned [`TrackedTask`]
-///   can cancel the user callable before it starts, but it does not own Tokio's
+/// * **Standard tracked-task cancellation** — the returned [`TrackedTask`] can
+///   cancel the user callable before it starts, but it does not own Tokio's
 ///   [`AbortHandle`](tokio::task::AbortHandle). If the Tokio blocking queue has
 ///   already accepted the wrapper closure, that wrapper may still wait for a
 ///   blocking thread and then observe the cancelled tracked state without
-///   running the user callable. Use [`TokioExecutorService`](crate::TokioExecutorService)
-///   and [`TokioBlockingTaskHandle`](crate::TokioBlockingTaskHandle) when
-///   queued Tokio blocking work must be aborted directly.
-/// * **Compared to
-///   [`ThreadPerTaskExecutor`](qubit_executor::executor::ThreadPerTaskExecutor)** —
+///   running the user callable. Use
+///   [`TokioExecutorService`](crate::TokioExecutorService) and
+///   [`TokioBlockingTaskHandle`](crate::TokioBlockingTaskHandle) when queued
+///   Tokio blocking work must be aborted directly.
+/// * **Compared to thread-per-task execution** — unlike
+///   [`ThreadPerTaskExecutor`](qubit_executor::executor::ThreadPerTaskExecutor),
 ///   this type **reuses** Tokio-managed blocking threads (bounded pool) instead
-///   of one new [`std::thread`] per task, and can return a handle that is either
-///   awaited or read with blocking `get`.
+///   of one new [`std::thread`] per task, and can return a handle that is
+///   either awaited or read with blocking `get`.
 ///
 /// # Examples
 ///
-/// The following uses a single-thread [`Runtime`](tokio::runtime::Runtime) only to keep the snippet
-/// self-contained; [`#[tokio::main]`](https://docs.rs/tokio/latest/tokio/attr.main.html)
+/// The following uses a single-thread [`Runtime`](tokio::runtime::Runtime) only
+/// to keep the snippet self-contained; [`#[tokio::main]`](https://docs.rs/tokio/latest/tokio/attr.main.html)
 /// or a multi-thread runtime are equally valid.
 ///
 /// ```rust
@@ -98,8 +97,9 @@ pub struct TokioExecutor;
 impl Executor for TokioExecutor {
     /// Spawns the callable on Tokio's blocking task pool.
     ///
-    /// This method invokes [`tokio::task::spawn_blocking`] **before** returning.
-    /// A Tokio runtime must be active when this method runs; see [`TokioExecutor`].
+    /// This method invokes [`tokio::task::spawn_blocking`] **before**
+    /// returning. A Tokio runtime must be active when this method runs; see
+    /// [`TokioExecutor`].
     ///
     /// # Parameters
     ///
@@ -113,7 +113,10 @@ impl Executor for TokioExecutor {
     ///
     /// Returns [`SubmissionError::WorkerSpawnFailed`] when the current thread
     /// is not entered into a Tokio runtime.
-    fn call<C, R, E>(&self, task: C) -> Result<TrackedTask<R, E>, SubmissionError>
+    fn call<C, R, E>(
+        &self,
+        task: C,
+    ) -> Result<TrackedTask<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
