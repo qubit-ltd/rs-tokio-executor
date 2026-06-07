@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::{
     future::Future,
     pin::Pin,
@@ -36,7 +34,6 @@ use qubit_executor::{
 ///
 /// * `R` - The task success value.
 /// * `E` - The task error value.
-///
 pub struct TokioTaskHandle<R, E> {
     /// Tokio task whose output is the accepted task's final result.
     handle: JoinHandle<TaskResult<R, E>>,
@@ -108,7 +105,9 @@ impl<R, E> Future for TokioTaskHandle<R, E> {
         let this = self.get_mut();
         match Pin::new(&mut this.handle).poll(cx) {
             Poll::Ready(Ok(result)) => Poll::Ready(result),
-            Poll::Ready(Err(error)) => Poll::Ready(Err(join_error_to_task_error(error))),
+            Poll::Ready(Err(error)) => {
+                Poll::Ready(Err(join_error_to_task_error(error)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }

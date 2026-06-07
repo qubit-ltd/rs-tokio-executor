@@ -18,7 +18,8 @@ use std::sync::{
 };
 
 #[tokio::test]
-async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown() {
+async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown()
+ {
     let service = TokioExecutorService::new();
     let handle = service
         .submit_callable(|| Ok::<_, io::Error>("done".to_owned()))
@@ -62,7 +63,8 @@ fn test_tokio_executor_service_rejects_callable_submissions_after_shutdown() {
 }
 
 #[test]
-fn test_tokio_executor_service_submit_without_runtime_returns_submission_error() {
+fn test_tokio_executor_service_submit_without_runtime_returns_submission_error()
+{
     let service = TokioExecutorService::new();
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -70,7 +72,10 @@ fn test_tokio_executor_service_submit_without_runtime_returns_submission_error()
     }))
     .expect("tokio executor service should not panic without a runtime");
 
-    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
+    assert!(matches!(
+        result,
+        Err(SubmissionError::WorkerSpawnFailed { .. })
+    ));
     assert!(service.is_running());
 
     service.shutdown();

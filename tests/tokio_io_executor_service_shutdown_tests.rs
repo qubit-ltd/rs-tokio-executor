@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::io;
 
 use qubit_executor::TaskExecutionError;
@@ -103,19 +101,24 @@ async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
     drop(release_tx);
     assert!(matches!(
         handle.await,
-        Err(TaskExecutionError::Cancelled) | Err(TaskExecutionError::Panicked) | Ok(())
+        Err(TaskExecutionError::Cancelled)
+            | Err(TaskExecutionError::Panicked)
+            | Ok(())
     ));
     assert!(service.is_terminated());
 }
 
 #[tokio::test]
-async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_tasks() {
+async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_tasks()
+ {
     let service = TokioIoExecutorService::new();
     let (release_tx, release_rx) = oneshot::channel();
 
     let pending_handle = service
         .spawn(async move {
-            release_rx.await.expect("pending task should receive release signal");
+            release_rx
+                .await
+                .expect("pending task should receive release signal");
             Ok::<(), io::Error>(())
         })
         .expect("service should accept pending task");
@@ -129,7 +132,11 @@ async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_t
     service.shutdown();
 
     assert!(!service.is_terminated());
-    release_tx.send(()).expect("pending task should receive release signal");
-    pending_handle.await.expect("pending task should complete successfully");
+    release_tx
+        .send(())
+        .expect("pending task should receive release signal");
+    pending_handle
+        .await
+        .expect("pending task should complete successfully");
     assert!(service.is_terminated());
 }

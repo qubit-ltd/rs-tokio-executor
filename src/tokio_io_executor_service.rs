@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::{
     future::Future,
     sync::Arc,
@@ -74,7 +72,10 @@ impl TokioIoExecutorService {
     /// requested before the task is accepted. Returns
     /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
     /// entered into a Tokio runtime.
-    pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
+    pub fn spawn<F, R, E>(
+        &self,
+        future: F,
+    ) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
         R: Send + 'static,
@@ -88,12 +89,16 @@ impl TokioIoExecutorService {
         self.state.active_tasks.inc();
 
         let marker = Arc::new(());
-        let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+        let guard = TokioIoServiceTaskGuard::new(
+            Arc::clone(&self.state),
+            Arc::clone(&marker),
+        );
         let handle = tokio::spawn(async move {
             let _guard = guard;
             future.await.map_err(TaskExecutionError::Failed)
         });
-        self.state.register_abort_handle(marker, handle.abort_handle());
+        self.state
+            .register_abort_handle(marker, handle.abort_handle());
         drop(submission_guard);
         Ok(TokioTaskHandle::new(handle))
     }
@@ -136,7 +141,8 @@ impl TokioIoExecutorService {
     ///
     /// # Returns
     ///
-    /// `true` only while the lifecycle is [`ExecutorServiceLifecycle::Running`].
+    /// `true` only while the lifecycle is
+    /// [`ExecutorServiceLifecycle::Running`].
     #[inline]
     pub fn is_running(&self) -> bool {
         self.lifecycle() == ExecutorServiceLifecycle::Running
@@ -157,7 +163,8 @@ impl TokioIoExecutorService {
     ///
     /// # Returns
     ///
-    /// `true` only while the lifecycle is [`ExecutorServiceLifecycle::Stopping`].
+    /// `true` only while the lifecycle is
+    /// [`ExecutorServiceLifecycle::Stopping`].
     #[inline]
     pub fn is_stopping(&self) -> bool {
         self.lifecycle() == ExecutorServiceLifecycle::Stopping

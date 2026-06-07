@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2025 - 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::sync::{
     Arc,
     atomic::{
@@ -39,13 +37,17 @@ impl TokioServiceTaskTracker {
     ///
     /// # Parameters
     ///
-    /// * `state` - Shared service state whose task counters this tracker updates.
+    /// * `state` - Shared service state whose task counters this tracker
+    ///   updates.
     /// * `marker` - Service-local marker associated with the task.
     ///
     /// # Returns
     ///
     /// A tracker initialized in the queued state.
-    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<()>) -> Self {
+    pub(crate) fn new(
+        state: Arc<TokioExecutorServiceState>,
+        marker: Arc<()>,
+    ) -> Self {
         Self {
             state,
             marker,
@@ -141,7 +143,10 @@ impl TokioServiceTaskGuard {
     /// # Returns
     ///
     /// A lifecycle guard bound to the supplied tracker.
-    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<()>) -> Self {
+    pub(crate) fn new(
+        state: Arc<TokioExecutorServiceState>,
+        marker: Arc<()>,
+    ) -> Self {
         Self {
             tracker: Arc::new(TokioServiceTaskTracker::new(state, marker)),
         }
@@ -164,7 +169,9 @@ impl TokioServiceTaskGuard {
     /// A callback used by service stop handling when Tokio aborts a queued
     /// blocking task before its closure starts. The callback returns `true`
     /// only when this call completed queued-task accounting.
-    pub(crate) fn finish_queued_once_callback(&self) -> impl FnOnce() -> bool + Send + 'static {
+    pub(crate) fn finish_queued_once_callback(
+        &self,
+    ) -> impl FnOnce() -> bool + Send + 'static {
         let tracker = Arc::clone(&self.tracker);
         move || tracker.finish_queued()
     }
@@ -176,7 +183,9 @@ impl TokioServiceTaskGuard {
     /// A callback used by tracked task handles when user cancellation wins.
     /// It removes the service abort handle before finishing queued accounting
     /// so later service stops do not count the same task again.
-    pub(crate) fn cancel_queued_callback(&self) -> impl Fn() + Send + Sync + 'static {
+    pub(crate) fn cancel_queued_callback(
+        &self,
+    ) -> impl Fn() + Send + Sync + 'static {
         let tracker = Arc::clone(&self.tracker);
         move || {
             tracker.cancel_queued();
@@ -187,7 +196,9 @@ impl TokioServiceTaskGuard {
 impl Drop for TokioServiceTaskGuard {
     /// Updates service counters when a task completes or is aborted.
     fn drop(&mut self) {
-        self.tracker.state.remove_abort_handle(self.tracker.marker());
+        self.tracker
+            .state
+            .remove_abort_handle(self.tracker.marker());
         self.tracker.finish();
     }
 }

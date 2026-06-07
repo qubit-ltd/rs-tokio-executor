@@ -9,7 +9,8 @@ use qubit_tokio_executor::{
 };
 
 #[tokio::test]
-async fn test_tokio_service_task_guard_notifies_termination_when_last_task_drops() {
+async fn test_tokio_service_task_guard_notifies_termination_when_last_task_drops()
+ {
     let service = TokioExecutorService::new();
     let handle = service
         .submit_tracked(|| {
