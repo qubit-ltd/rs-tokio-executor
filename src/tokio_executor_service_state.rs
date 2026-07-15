@@ -240,9 +240,9 @@ impl TokioExecutorServiceState {
     /// Returns the observed lifecycle state.
     pub(crate) fn lifecycle(&self) -> ExecutorServiceLifecycle {
         let lifecycle = executor_service_lifecycle_bits::load(&self.lifecycle);
-        let has_no_tasks =
-            self.task_counts
-                .with_read(TokioExecutorTaskCounts::is_empty);
+        let has_no_tasks = self
+            .task_counts
+            .with_read(TokioExecutorTaskCounts::is_empty);
         if lifecycle != ExecutorServiceLifecycle::Running && has_no_tasks {
             ExecutorServiceLifecycle::Terminated
         } else {
