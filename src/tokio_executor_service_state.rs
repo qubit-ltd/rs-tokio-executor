@@ -107,13 +107,14 @@ impl TokioExecutorServiceState {
 
     /// Records a newly accepted task as queued.
     pub(crate) fn accept_task(&self) {
-        self.task_counts.write(TokioExecutorTaskCounts::accept_task);
+        self.task_counts
+            .with_write(TokioExecutorTaskCounts::accept_task);
     }
 
     /// Moves a task from queued to running.
     pub(crate) fn mark_task_started(&self) {
         self.task_counts
-            .write(TokioExecutorTaskCounts::mark_started);
+            .with_write(TokioExecutorTaskCounts::mark_started);
     }
 
     /// Records task completion or queued-task abortion.
@@ -122,7 +123,7 @@ impl TokioExecutorServiceState {
     ///
     /// * `started` - Whether the task had already started running.
     pub(crate) fn finish_task(&self, started: bool) {
-        let terminated = self.task_counts.write(|counts| {
+        let terminated = self.task_counts.with_write(|counts| {
             counts.finish_task(started);
             self.is_not_running() && counts.is_empty()
         });
@@ -139,7 +140,7 @@ impl TokioExecutorServiceState {
     /// the running count.
     pub(crate) fn task_count_snapshot(&self) -> (usize, usize) {
         self.task_counts
-            .read(|counts| (counts.queued, counts.running))
+            .with_read(|counts| (counts.queued, counts.running))
     }
 
     /// Registers an abort handle if the task has not already finished.
@@ -205,7 +206,7 @@ impl TokioExecutorServiceState {
     pub(crate) fn notify_if_terminated(&self) {
         let terminated = self
             .task_counts
-            .read(|counts| self.is_not_running() && counts.is_empty());
+            .with_read(|counts| self.is_not_running() && counts.is_empty());
         if terminated {
             self.notify_termination_waiters();
         }
@@ -240,7 +241,8 @@ impl TokioExecutorServiceState {
     pub(crate) fn lifecycle(&self) -> ExecutorServiceLifecycle {
         let lifecycle = executor_service_lifecycle_bits::load(&self.lifecycle);
         let has_no_tasks =
-            self.task_counts.read(TokioExecutorTaskCounts::is_empty);
+            self.task_counts
+                .with_read(TokioExecutorTaskCounts::is_empty);
         if lifecycle != ExecutorServiceLifecycle::Running && has_no_tasks {
             ExecutorServiceLifecycle::Terminated
         } else {
