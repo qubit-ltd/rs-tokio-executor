@@ -276,6 +276,8 @@ dependencies = [
 [[package]]
 name = "qubit-clock"
 version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "936d7d12df99b080bccf6999a2e16d5ef44874d897a18b42a85551861e7f393e"
 dependencies = [
  "qubit-collections",
  "thiserror",
@@ -284,6 +286,8 @@ dependencies = [
 [[package]]
 name = "qubit-collections"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e52fb7b0bbadb0b5ab1227d527c8ab46922338fbc9cdd71480dbdb83cfd472af"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -291,6 +295,8 @@ dependencies = [
 [[package]]
 name = "qubit-datatype"
 version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9dd16b80a75460ac639b745af90ef486a7544574c63d0949994678afe05dd83"
 dependencies = [
  "serde",
  "thiserror",
@@ -333,6 +339,7 @@ version = "0.11.0"
 dependencies = [
  "parking_lot",
  "qubit-clock",
+ "qubit-collections",
 ]
 
 [[package]]
