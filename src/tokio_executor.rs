@@ -11,10 +11,7 @@ use qubit_executor::{
     TrackedTask,
     executor::Executor,
     service::SubmissionError,
-    task::spi::{
-        TaskEndpointPair,
-        TaskRunner,
-    },
+    task::spi::{TaskEndpointPair, TaskRunner},
 };
 
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
@@ -69,10 +66,8 @@ use crate::tokio_runtime::ensure_tokio_runtime_entered;
 /// ```rust
 /// use std::io;
 ///
-/// use qubit_tokio_executor::{
-///     Executor,
-///     TokioExecutor,
-/// };
+/// use qubit_executor::executor::Executor;
+/// use qubit_tokio_executor::TokioExecutor;
 ///
 /// # fn main() -> io::Result<()> {
 /// tokio::runtime::Builder::new_current_thread()
@@ -113,10 +108,7 @@ impl Executor for TokioExecutor {
     ///
     /// Returns [`SubmissionError::WorkerSpawnFailed`] when the current thread
     /// is not entered into a Tokio runtime.
-    fn call<C, R, E>(
-        &self,
-        task: C,
-    ) -> Result<TrackedTask<R, E>, SubmissionError>
+    fn call<C, R, E>(&self, task: C) -> Result<TrackedTask<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,

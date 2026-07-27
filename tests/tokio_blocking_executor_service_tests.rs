@@ -8,23 +8,13 @@
 //! Smoke tests for
 //! [`TokioBlockingExecutorService`](qubit_tokio_executor::service::TokioBlockingExecutorService).
 
-use std::{
-    io,
-    sync::mpsc,
-    time::Duration,
-};
+use std::{io, sync::mpsc, time::Duration};
 
+use qubit_executor::service::ExecutorService;
 use qubit_executor::{
-    CancelResult,
-    TaskExecutionError,
-    TaskStatus,
-    TryGet,
-    task::spi::TrackedTaskHandle,
+    CancelResult, TaskExecutionError, TaskStatus, TryGet, task::spi::TrackedTaskHandle,
 };
-use qubit_tokio_executor::service::{
-    ExecutorService,
-    TokioBlockingExecutorService,
-};
+use qubit_tokio_executor::TokioBlockingExecutorService;
 
 #[tokio::test]
 async fn test_tokio_blocking_executor_service_alias_runs_blocking_callable() {

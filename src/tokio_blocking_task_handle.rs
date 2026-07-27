@@ -9,15 +9,8 @@ use std::future::IntoFuture;
 
 use qubit_executor::task::TaskHandleFuture;
 use qubit_executor::{
-    CancelResult,
-    TaskResult,
-    TaskStatus,
-    TrackedTask,
-    TryGet,
-    task::spi::{
-        TaskResultHandle,
-        TrackedTaskHandle,
-    },
+    CancelResult, TaskResult, TaskStatus, TrackedTask, TryGet,
+    task::spi::{TaskResultHandle, TrackedTaskHandle},
 };
 use tokio::task::AbortHandle;
 
