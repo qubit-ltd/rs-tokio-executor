@@ -29,10 +29,7 @@ impl TokioIoServiceTaskGuard {
     /// # Returns
     ///
     /// A lifecycle guard bound to the supplied service state.
-    pub(crate) fn new(
-        state: Arc<TokioIoExecutorServiceState>,
-        marker: Arc<()>,
-    ) -> Self {
+    pub(crate) fn new(state: Arc<TokioIoExecutorServiceState>, marker: Arc<()>) -> Self {
         Self { state, marker }
     }
 }
@@ -42,5 +39,6 @@ impl Drop for TokioIoServiceTaskGuard {
     fn drop(&mut self) {
         self.state.remove_abort_handle(&self.marker);
         self.state.active_tasks.dec();
+        self.state.notify_termination_waiters();
     }
 }

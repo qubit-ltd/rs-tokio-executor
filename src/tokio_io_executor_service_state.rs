@@ -5,15 +5,11 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::sync::{
-    Arc,
-    Mutex,
-    MutexGuard,
-    atomic::AtomicU8,
-};
+use std::sync::{Arc, Mutex, MutexGuard, atomic::AtomicU8};
 
 use qubit_atomic::AtomicCount;
 use qubit_executor::service::ExecutorServiceLifecycle;
+use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 
 use crate::executor_service_lifecycle_bits;
@@ -37,6 +33,8 @@ pub(crate) struct TokioIoExecutorServiceState {
     submission_lock: Mutex<()>,
     /// Abort handles for async tasks accepted by this service.
     abort_handles: Mutex<Vec<TrackedAbortHandle>>,
+    /// Wakes async termination waiters after lifecycle-affecting changes.
+    termination_notify: Notify,
 }
 
 impl TokioIoExecutorServiceState {
@@ -61,11 +59,7 @@ impl TokioIoExecutorServiceState {
     ///
     /// * `marker` - Service-local task marker shared with the lifecycle guard.
     /// * `handle` - Tokio abort handle for the accepted task.
-    pub(crate) fn register_abort_handle(
-        &self,
-        marker: Arc<()>,
-        handle: AbortHandle,
-    ) {
+    pub(crate) fn register_abort_handle(&self, marker: Arc<()>, handle: AbortHandle) {
         let mut handles = self.lock_abort_handles();
         if !handle.is_finished() {
             handles.push(TrackedAbortHandle { marker, handle });
@@ -113,9 +107,7 @@ impl TokioIoExecutorServiceState {
     /// Returns the observed lifecycle state.
     pub(crate) fn lifecycle(&self) -> ExecutorServiceLifecycle {
         let lifecycle = executor_service_lifecycle_bits::load(&self.lifecycle);
-        if lifecycle != ExecutorServiceLifecycle::Running
-            && self.active_tasks.is_zero()
-        {
+        if lifecycle != ExecutorServiceLifecycle::Running && self.active_tasks.is_zero() {
             ExecutorServiceLifecycle::Terminated
         } else {
             lifecycle
@@ -124,17 +116,30 @@ impl TokioIoExecutorServiceState {
 
     /// Returns whether shutdown or stop has been requested.
     pub(crate) fn is_not_running(&self) -> bool {
-        executor_service_lifecycle_bits::load(&self.lifecycle)
-            != ExecutorServiceLifecycle::Running
+        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
     }
 
     /// Marks the service as shutting down.
     pub(crate) fn shutdown(&self) {
         executor_service_lifecycle_bits::shutdown(&self.lifecycle);
+        self.termination_notify.notify_waiters();
     }
 
     /// Marks the service as stopping.
     pub(crate) fn stop(&self) {
         executor_service_lifecycle_bits::stop(&self.lifecycle);
+        self.termination_notify.notify_waiters();
+    }
+
+    /// Wakes async waiters after a task or lifecycle transition changes.
+    pub(crate) fn notify_termination_waiters(&self) {
+        self.termination_notify.notify_waiters();
+    }
+
+    /// Waits until shutdown has completed and all accepted tasks are gone.
+    pub(crate) async fn await_termination(&self) {
+        while self.lifecycle() != ExecutorServiceLifecycle::Terminated {
+            self.termination_notify.notified().await;
+        }
     }
 }

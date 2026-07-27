@@ -12,8 +12,5 @@
 //! test files to source files.
 
 pub use crate::tokio_task_slot_cancellation::{
-    SharedTaskSlot,
-    cancel_unstarted_task_slot_if_queued,
-    share_task_slot,
-    take_task_slot,
+    SharedTaskSlot, cancel_unstarted_task_slot_if_queued, share_task_slot, take_task_slot,
 };

@@ -1,25 +1,14 @@
-use std::{
-    io,
-    panic::AssertUnwindSafe,
-};
+use std::{io, panic::AssertUnwindSafe};
 
-use qubit_tokio_executor::{
-    ExecutorService,
-    ExecutorServiceLifecycle,
-    SubmissionError,
-    TokioExecutorService,
-};
+use qubit_executor::service::{ExecutorService, ExecutorServiceLifecycle, SubmissionError};
+use qubit_tokio_executor::TokioExecutorService;
 use std::sync::{
     Arc,
-    atomic::{
-        AtomicBool,
-        Ordering,
-    },
+    atomic::{AtomicBool, Ordering},
 };
 
 #[tokio::test]
-async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown()
- {
+async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown() {
     let service = TokioExecutorService::new();
     let handle = service
         .submit_callable(|| Ok::<_, io::Error>("done".to_owned()))
@@ -63,8 +52,7 @@ fn test_tokio_executor_service_rejects_callable_submissions_after_shutdown() {
 }
 
 #[test]
-fn test_tokio_executor_service_submit_without_runtime_returns_submission_error()
-{
+fn test_tokio_executor_service_submit_without_runtime_returns_submission_error() {
     let service = TokioExecutorService::new();
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {

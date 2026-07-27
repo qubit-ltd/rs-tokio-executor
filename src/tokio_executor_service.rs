@@ -8,37 +8,24 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{
-        Arc,
-        MutexGuard,
-    },
+    sync::{Arc, MutexGuard},
+    time::Duration,
 };
 
-use qubit_function::{
-    Callable,
-    Runnable,
-};
+use qubit_function::{Callable, Runnable};
 
 use qubit_executor::TaskHandle;
-use qubit_executor::task::spi::{
-    TaskEndpointPair,
-    TaskRunner,
-};
+use qubit_executor::task::spi::{TaskEndpointPair, TaskRunner};
 
 use crate::TokioBlockingTaskHandle;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
 use crate::tokio_task_slot_cancellation::{
-    cancel_unstarted_task_slot_if_queued,
-    share_task_slot,
-    take_task_slot,
+    cancel_unstarted_task_slot_if_queued, share_task_slot, take_task_slot,
 };
 use qubit_executor::service::{
-    ExecutorService,
-    ExecutorServiceLifecycle,
-    StopReport,
-    SubmissionError,
+    ExecutorService, ExecutorServiceLifecycle, StopReport, SubmissionError,
 };
 use tokio::task::AbortHandle;
 
@@ -80,10 +67,7 @@ impl TokioExecutorService {
     /// entered into a Tokio runtime.
     fn prepare_blocking_submission(
         &self,
-    ) -> Result<
-        (MutexGuard<'_, ()>, Arc<()>, TokioServiceTaskGuard),
-        SubmissionError,
-    > {
+    ) -> Result<(MutexGuard<'_, ()>, Arc<()>, TokioServiceTaskGuard), SubmissionError> {
         let submission_guard = self.state.lock_submission();
         if self.state.is_not_running() {
             return Err(SubmissionError::Shutdown);
@@ -92,10 +76,7 @@ impl TokioExecutorService {
         self.state.accept_task();
 
         let marker = Arc::new(());
-        let guard = TokioServiceTaskGuard::new(
-            Arc::clone(&self.state),
-            Arc::clone(&marker),
-        );
+        let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
         Ok((submission_guard, marker, guard))
     }
 
@@ -180,8 +161,7 @@ impl ExecutorService for TokioExecutorService {
         T: Runnable<E> + Send + 'static,
         E: Send + 'static,
     {
-        let (submission_guard, marker, guard) =
-            self.prepare_blocking_submission()?;
+        let (submission_guard, marker, guard) = self.prepare_blocking_submission()?;
         let abort_queued_task = guard.finish_queued_once_callback();
         self.spawn_accepted_blocking_task(
             submission_guard,
@@ -213,17 +193,13 @@ impl ExecutorService for TokioExecutorService {
     /// requested before the task is accepted. Returns
     /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
     /// entered into a Tokio runtime.
-    fn submit_callable<C, R, E>(
-        &self,
-        task: C,
-    ) -> Result<Self::ResultHandle<R, E>, SubmissionError>
+    fn submit_callable<C, R, E>(&self, task: C) -> Result<Self::ResultHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
         E: Send + 'static,
     {
-        let (submission_guard, marker, guard) =
-            self.prepare_blocking_submission()?;
+        let (submission_guard, marker, guard) = self.prepare_blocking_submission()?;
         let (handle, completion) = TaskEndpointPair::new().into_parts();
         completion.accept();
         let completion = share_task_slot(completion);
@@ -238,12 +214,7 @@ impl ExecutorService for TokioExecutorService {
                     TaskRunner::new(task).run(completion);
                 }
             },
-            move || {
-                cancel_unstarted_task_slot_if_queued(
-                    &abort_completion,
-                    abort_queued_task,
-                )
-            },
+            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
         );
         Ok(handle)
     }
@@ -273,8 +244,7 @@ impl ExecutorService for TokioExecutorService {
         R: Send + 'static,
         E: Send + 'static,
     {
-        let (submission_guard, marker, guard) =
-            self.prepare_blocking_submission()?;
+        let (submission_guard, marker, guard) = self.prepare_blocking_submission()?;
         let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
         completion.accept();
         let completion = share_task_slot(completion);
@@ -290,12 +260,7 @@ impl ExecutorService for TokioExecutorService {
                     TaskRunner::new(task).run(completion);
                 }
             },
-            move || {
-                cancel_unstarted_task_slot_if_queued(
-                    &abort_completion,
-                    abort_queued_task,
-                )
-            },
+            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
         );
         Ok(TokioBlockingTaskHandle::new(
             handle,
@@ -353,6 +318,11 @@ impl ExecutorService for TokioExecutorService {
     fn wait_termination(&self) {
         self.state.wait_termination();
     }
+
+    /// Waits at most `timeout` for the blocking Tokio service to terminate.
+    fn wait_termination_timeout(&self, timeout: Duration) -> bool {
+        self.state.wait_termination_timeout(timeout)
+    }
 }
 
 impl TokioExecutorService {
@@ -362,9 +332,7 @@ impl TokioExecutorService {
     ///
     /// A future that resolves after shutdown or stop has been requested and all
     /// accepted blocking tasks have finished or been aborted before start.
-    pub fn await_termination(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    pub fn await_termination(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             let notified = self.state.terminated_notify.notified();
             tokio::pin!(notified);

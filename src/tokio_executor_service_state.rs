@@ -5,19 +5,14 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::sync::{
-    Arc,
-    Mutex,
-    MutexGuard,
-    atomic::AtomicU8,
+use std::{
+    sync::{Arc, Mutex, MutexGuard, atomic::AtomicU8},
+    time::{Duration, Instant},
 };
 
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::ParkingLotMonitor;
-use tokio::{
-    sync::Notify,
-    task::AbortHandle,
-};
+use tokio::{sync::Notify, task::AbortHandle};
 
 use crate::executor_service_lifecycle_bits;
 
@@ -155,12 +150,8 @@ impl TokioExecutorServiceState {
     /// * `handle` - Tokio abort handle for the accepted task.
     /// * `cancel` - Hook that publishes queued-task cancellation and reports
     ///   whether queued service accounting was actually cancelled.
-    pub(crate) fn register_abort_handle<F>(
-        &self,
-        marker: Arc<()>,
-        handle: AbortHandle,
-        cancel: F,
-    ) where
+    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
+    where
         F: FnOnce() -> bool + Send + 'static,
     {
         let mut handles = self.lock_abort_handles();
@@ -220,6 +211,24 @@ impl TokioExecutorServiceState {
         );
     }
 
+    /// Waits until termination or the supplied monotonic deadline expires.
+    pub(crate) fn wait_termination_timeout(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut counts = self.task_counts.lock();
+        loop {
+            if self.is_not_running() && counts.is_empty() {
+                return true;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            let _wait_status = counts
+                .wait_for(remaining)
+                .expect("standard Timer should register");
+        }
+    }
+
     /// Wakes both synchronous and asynchronous termination waiters.
     fn notify_termination_waiters(&self) {
         self.task_counts.notify_all();
@@ -252,8 +261,7 @@ impl TokioExecutorServiceState {
 
     /// Returns whether shutdown or stop has been requested.
     pub(crate) fn is_not_running(&self) -> bool {
-        executor_service_lifecycle_bits::load(&self.lifecycle)
-            != ExecutorServiceLifecycle::Running
+        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
     }
 
     /// Marks the service as shutting down.

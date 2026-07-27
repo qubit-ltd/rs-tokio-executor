@@ -7,21 +7,10 @@
 // =============================================================================
 //! Tests for [`TokioExecutor`](qubit_tokio_executor::TokioExecutor).
 
-use std::{
-    io,
-    sync::mpsc,
-    time::Duration,
-};
+use std::{io, sync::mpsc, time::Duration};
 
-use qubit_executor::{
-    CancelResult,
-    SubmissionError,
-    TaskExecutionError,
-};
-use qubit_tokio_executor::{
-    Executor,
-    TokioExecutor,
-};
+use qubit_executor::{CancelResult, Executor, SubmissionError, TaskExecutionError};
+use qubit_tokio_executor::TokioExecutor;
 
 #[tokio::test]
 async fn test_tokio_executor_execute_returns_future_result() {
@@ -51,10 +40,8 @@ async fn test_tokio_executor_call_returns_future_value() {
 fn test_tokio_executor_call_without_runtime_returns_submission_error() {
     let executor = TokioExecutor;
 
-    let result = std::panic::catch_unwind(|| {
-        executor.call(|| Ok::<usize, io::Error>(42))
-    })
-    .expect("tokio executor should not panic without a runtime");
+    let result = std::panic::catch_unwind(|| executor.call(|| Ok::<usize, io::Error>(42)))
+        .expect("tokio executor should not panic without a runtime");
 
     assert!(matches!(
         result,

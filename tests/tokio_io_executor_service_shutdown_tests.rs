@@ -7,7 +7,7 @@
 // =============================================================================
 use std::io;
 
-use qubit_executor::TaskExecutionError;
+use qubit_executor::{SubmissionError, TaskExecutionError};
 use qubit_tokio_executor::TokioIoExecutorService;
 use tokio::sync::oneshot;
 
@@ -18,10 +18,7 @@ async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
 
     let result = service.spawn(async { Ok::<(), io::Error>(()) });
 
-    assert!(matches!(
-        result,
-        Err(qubit_tokio_executor::service::SubmissionError::Shutdown)
-    ));
+    assert!(matches!(result, Err(SubmissionError::Shutdown)));
     assert!(service.is_not_running());
     assert!(service.is_terminated());
 }
@@ -101,16 +98,13 @@ async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
     drop(release_tx);
     assert!(matches!(
         handle.await,
-        Err(TaskExecutionError::Cancelled)
-            | Err(TaskExecutionError::Panicked)
-            | Ok(())
+        Err(TaskExecutionError::Cancelled) | Err(TaskExecutionError::Panicked) | Ok(())
     ));
     assert!(service.is_terminated());
 }
 
 #[tokio::test]
-async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_tasks()
- {
+async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_tasks() {
     let service = TokioIoExecutorService::new();
     let (release_tx, release_rx) = oneshot::channel();
 
