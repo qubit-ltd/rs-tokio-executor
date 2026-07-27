@@ -7,11 +7,15 @@
 // =============================================================================
 use std::{
     sync::{Arc, Mutex, MutexGuard, atomic::AtomicU8},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use qubit_executor::service::ExecutorServiceLifecycle;
-use qubit_lock::ParkingLotMonitor;
+use qubit_lock::{
+    ParkingLotMonitor,
+    TimeError,
+    WaitTimeoutResult,
+};
 use tokio::{sync::Notify, task::AbortHandle};
 
 use crate::executor_service_lifecycle_bits;
@@ -213,19 +217,25 @@ impl TokioExecutorServiceState {
 
     /// Waits until termination or the supplied monotonic deadline expires.
     pub(crate) fn wait_termination_timeout(&self, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        let mut counts = self.task_counts.lock();
-        loop {
-            if self.is_not_running() && counts.is_empty() {
+        let deadline = match self.task_counts.timer().now().checked_add(timeout) {
+            Ok(deadline) => deadline,
+            Err(TimeError::InstantOverflow) => {
+                self.wait_termination();
                 return true;
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return false;
+            Err(error) => panic!("Tokio executor deadline construction failed: {error}"),
+        };
+        match self.task_counts.wait_until_ready_with_deadline(
+            deadline,
+            |counts| self.is_not_running() && counts.is_empty(),
+        ) {
+            Ok(WaitTimeoutResult::Ready(())) => true,
+            Ok(WaitTimeoutResult::TimedOut) => false,
+            Err(TimeError::InstantOverflow) => {
+                self.wait_termination();
+                true
             }
-            let _wait_status = counts
-                .wait_for(remaining)
-                .expect("standard Timer should register");
+            Err(error) => panic!("Tokio executor termination wait failed: {error}"),
         }
     }
 
