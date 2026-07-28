@@ -37,7 +37,7 @@ qubit-atomic = "0.13"
 qubit-function = "0.16"
 qubit-executor = { version = "0.7", path = "../rs-executor" }
 qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], version = "0.11.0", path = "../rs-lock" }
-qubit-clock = { version = "0.10.1", path = "../rs-clock" }
+qubit-clock = { version = "0.11.0", path = "../rs-clock" }
 
 [dev-dependencies]
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
