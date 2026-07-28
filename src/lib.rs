@@ -27,6 +27,9 @@ pub mod testing;
 
 pub use tokio_blocking_task_handle::TokioBlockingTaskHandle;
 pub use tokio_executor::TokioExecutor;
-pub use tokio_executor_service::{TokioBlockingExecutorService, TokioExecutorService};
+pub use tokio_executor_service::{
+    TokioBlockingExecutorService,
+    TokioExecutorService,
+};
 pub use tokio_io_executor_service::TokioIoExecutorService;
 pub use tokio_task_handle::TokioTaskHandle;

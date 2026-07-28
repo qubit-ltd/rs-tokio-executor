@@ -1,4 +1,8 @@
-use std::{io, sync::mpsc, time::Duration};
+use std::{
+    io,
+    sync::mpsc,
+    time::Duration,
+};
 
 use qubit_executor::service::ExecutorService;
 use qubit_tokio_executor::TokioExecutorService;

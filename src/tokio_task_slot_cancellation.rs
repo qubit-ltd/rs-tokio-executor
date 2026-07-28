@@ -7,7 +7,10 @@
 // =============================================================================
 use std::sync::Arc;
 
-use qubit_executor::task::spi::{TaskSlot, TaskSlotCell};
+use qubit_executor::task::spi::{
+    TaskSlot,
+    TaskSlotCell,
+};
 
 /// Shared runner-side task slot used by service stop and task execution paths.
 pub type SharedTaskSlot<R, E> = Arc<TaskSlotCell<R, E>>;
@@ -36,7 +39,9 @@ pub fn share_task_slot<R, E>(slot: TaskSlot<R, E>) -> SharedTaskSlot<R, E> {
 /// # Returns
 ///
 /// `Some(TaskSlot)` if this call won the slot ownership race, otherwise `None`.
-pub fn take_task_slot<R, E>(slot: &SharedTaskSlot<R, E>) -> Option<TaskSlot<R, E>> {
+pub fn take_task_slot<R, E>(
+    slot: &SharedTaskSlot<R, E>,
+) -> Option<TaskSlot<R, E>> {
     slot.take()
 }
 

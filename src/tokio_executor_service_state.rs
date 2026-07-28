@@ -6,17 +6,25 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::{
-    sync::{Arc, Mutex, MutexGuard, atomic::AtomicU8},
+    sync::{
+        Arc,
+        Mutex,
+        MutexGuard,
+        atomic::AtomicU8,
+    },
     time::Duration,
 };
 
+use qubit_clock::TimeError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::{
     ParkingLotMonitor,
-    TimeError,
     WaitTimeoutResult,
 };
-use tokio::{sync::Notify, task::AbortHandle};
+use tokio::{
+    sync::Notify,
+    task::AbortHandle,
+};
 
 use crate::executor_service_lifecycle_bits;
 
@@ -154,8 +162,12 @@ impl TokioExecutorServiceState {
     /// * `handle` - Tokio abort handle for the accepted task.
     /// * `cancel` - Hook that publishes queued-task cancellation and reports
     ///   whether queued service accounting was actually cancelled.
-    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
-    where
+    pub(crate) fn register_abort_handle<F>(
+        &self,
+        marker: Arc<()>,
+        handle: AbortHandle,
+        cancel: F,
+    ) where
         F: FnOnce() -> bool + Send + 'static,
     {
         let mut handles = self.lock_abort_handles();
@@ -217,25 +229,30 @@ impl TokioExecutorServiceState {
 
     /// Waits until termination or the supplied monotonic deadline expires.
     pub(crate) fn wait_termination_timeout(&self, timeout: Duration) -> bool {
-        let deadline = match self.task_counts.timer().now().checked_add(timeout) {
+        let deadline = match self.task_counts.timer().deadline_after(timeout) {
             Ok(deadline) => deadline,
             Err(TimeError::InstantOverflow) => {
                 self.wait_termination();
                 return true;
             }
-            Err(error) => panic!("Tokio executor deadline construction failed: {error}"),
+            Err(error) => {
+                panic!("Tokio executor deadline construction failed: {error}")
+            }
         };
-        match self.task_counts.wait_until_ready_with_deadline(
-            deadline,
-            |counts| self.is_not_running() && counts.is_empty(),
-        ) {
+        match self
+            .task_counts
+            .wait_until_ready_with_deadline(deadline, |counts| {
+                self.is_not_running() && counts.is_empty()
+            }) {
             Ok(WaitTimeoutResult::Ready(())) => true,
             Ok(WaitTimeoutResult::TimedOut) => false,
             Err(TimeError::InstantOverflow) => {
                 self.wait_termination();
                 true
             }
-            Err(error) => panic!("Tokio executor termination wait failed: {error}"),
+            Err(error) => {
+                panic!("Tokio executor termination wait failed: {error}")
+            }
         }
     }
 
@@ -271,7 +288,8 @@ impl TokioExecutorServiceState {
 
     /// Returns whether shutdown or stop has been requested.
     pub(crate) fn is_not_running(&self) -> bool {
-        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
+        executor_service_lifecycle_bits::load(&self.lifecycle)
+            != ExecutorServiceLifecycle::Running
     }
 
     /// Marks the service as shutting down.

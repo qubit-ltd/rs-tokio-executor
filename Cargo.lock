@@ -112,19 +112,15 @@ dependencies = [
 
 [[package]]
 name = "qubit-clock"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "936d7d12df99b080bccf6999a2e16d5ef44874d897a18b42a85551861e7f393e"
+version = "0.10.1"
 dependencies = [
- "qubit-collections 0.1.0",
+ "qubit-collections 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror",
 ]
 
 [[package]]
 name = "qubit-collections"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e52fb7b0bbadb0b5ab1227d527c8ab46922338fbc9cdd71480dbdb83cfd472af"
+version = "0.2.0"
 dependencies = [
  "hashbrown",
 ]
@@ -132,6 +128,8 @@ dependencies = [
 [[package]]
 name = "qubit-collections"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcb596d37e055a48800f0381926881152612b9171cad3be8e91dee97daee6f5b"
 dependencies = [
  "hashbrown",
 ]
@@ -144,6 +142,7 @@ dependencies = [
  "oneshot",
  "parking_lot",
  "qubit-atomic",
+ "qubit-clock",
  "qubit-collections 0.2.0",
  "qubit-fast-cas",
  "qubit-function",
@@ -183,6 +182,7 @@ name = "qubit-tokio-executor"
 version = "0.8.0"
 dependencies = [
  "qubit-atomic",
+ "qubit-clock",
  "qubit-executor",
  "qubit-function",
  "qubit-lock",
