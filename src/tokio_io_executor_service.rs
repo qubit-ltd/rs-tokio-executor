@@ -5,7 +5,10 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{future::Future, sync::Arc};
+use std::{
+    future::Future,
+    sync::Arc,
+};
 
 use qubit_executor::TaskExecutionError;
 
@@ -13,13 +16,16 @@ use crate::TokioTaskHandle;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
-use qubit_executor::service::{ExecutorServiceLifecycle, StopReport, SubmissionError};
+use qubit_executor::service::{
+    ExecutorServiceLifecycle,
+    StopReport,
+    SubmissionError,
+};
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///
 /// Accepted futures are spawned with [`tokio::spawn`], so waiting for external
 /// IO does not occupy a dedicated blocking thread.
-///
 #[derive(Default, Clone)]
 pub struct TokioIoExecutorService {
     /// Shared service state used by all clones of this service.
@@ -53,7 +59,10 @@ impl TokioIoExecutorService {
     /// requested before the task is accepted. Returns
     /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
     /// entered into a Tokio runtime.
-    pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
+    pub fn spawn<F, R, E>(
+        &self,
+        future: F,
+    ) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
         R: Send + 'static,
@@ -67,7 +76,10 @@ impl TokioIoExecutorService {
         self.state.active_tasks.inc();
 
         let marker = Arc::new(());
-        let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+        let guard = TokioIoServiceTaskGuard::new(
+            Arc::clone(&self.state),
+            Arc::clone(&marker),
+        );
         let handle = tokio::spawn(async move {
             let _guard = guard;
             future.await.map_err(TaskExecutionError::Failed)

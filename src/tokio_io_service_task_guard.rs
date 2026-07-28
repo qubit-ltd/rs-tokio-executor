@@ -29,7 +29,10 @@ impl TokioIoServiceTaskGuard {
     /// # Returns
     ///
     /// A lifecycle guard bound to the supplied service state.
-    pub(crate) fn new(state: Arc<TokioIoExecutorServiceState>, marker: Arc<()>) -> Self {
+    pub(crate) fn new(
+        state: Arc<TokioIoExecutorServiceState>,
+        marker: Arc<()>,
+    ) -> Self {
         Self { state, marker }
     }
 }

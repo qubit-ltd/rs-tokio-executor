@@ -22,8 +22,8 @@ pub(crate) fn ensure_tokio_runtime_entered() -> Result<(), SubmissionError> {
     tokio::runtime::Handle::try_current()
         .map(|_| ())
         .map_err(|error| {
-            SubmissionError::worker_spawn_failed(std::io::Error::other(format!(
-                "Tokio runtime is not entered: {error}",
-            )))
+            SubmissionError::worker_spawn_failed(std::io::Error::other(
+                format!("Tokio runtime is not entered: {error}",),
+            ))
         })
 }
