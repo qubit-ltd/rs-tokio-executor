@@ -113,6 +113,8 @@ dependencies = [
 [[package]]
 name = "qubit-clock"
 version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3725afc6c33cda605769dd735d6e2c7b5278f08e071848f1b1bf30519aaefd2e"
 dependencies = [
  "qubit-collections 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror",
