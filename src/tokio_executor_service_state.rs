@@ -16,11 +16,11 @@ use std::{
 };
 
 use qubit_clock::TimeError;
-use qubit_executor::service::ExecutorServiceLifecycle;
-use qubit_lock::{
-    ParkingLotMonitor,
-    WaitTimeoutResult,
+use qubit_executor::{
+    service::ExecutorServiceLifecycle,
+    wait_until_ready_with_total_timeout,
 };
+use qubit_lock::ParkingLotMonitor;
 use tokio::{
     sync::Notify,
     task::AbortHandle,
@@ -227,25 +227,16 @@ impl TokioExecutorServiceState {
         );
     }
 
-    /// Waits until termination or the supplied monotonic deadline expires.
+    /// Waits until termination or the total timeout expires.
     pub(crate) fn wait_termination_timeout(&self, timeout: Duration) -> bool {
-        let deadline = match self.task_counts.timer().deadline_after(timeout) {
-            Ok(deadline) => deadline,
-            Err(TimeError::InstantOverflow) => {
-                self.wait_termination();
-                return true;
-            }
-            Err(error) => {
-                panic!("Tokio executor deadline construction failed: {error}")
-            }
-        };
-        match self
-            .task_counts
-            .wait_until_ready_with_deadline(deadline, |counts| {
+        match wait_until_ready_with_total_timeout(
+            &self.task_counts,
+            timeout,
+            |counts| {
                 self.is_not_running() && counts.is_empty()
-            }) {
-            Ok(WaitTimeoutResult::Ready(())) => true,
-            Ok(WaitTimeoutResult::TimedOut) => false,
+            },
+        ) {
+            Ok(ready) => ready,
             Err(TimeError::InstantOverflow) => {
                 self.wait_termination();
                 true
