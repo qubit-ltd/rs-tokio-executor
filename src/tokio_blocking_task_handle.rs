@@ -27,8 +27,12 @@ type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 /// Tracked handle for tasks submitted to Tokio's blocking task pool.
 ///
 /// This handle wraps the standard [`TrackedTask`] result/status endpoint and
-/// additionally keeps Tokio's [`AbortHandle`] so pre-start cancellation can
-/// remove queued `spawn_blocking` work from the Tokio runtime.
+/// additionally keeps Tokio's [`AbortHandle`] to request pre-start
+/// cancellation of queued `spawn_blocking` work.
+///
+/// Tokio processes the request asynchronously. A cancelled result or service
+/// termination does not guarantee that Tokio has already dropped the queued
+/// closure or its captures.
 ///
 /// Tokio cannot abort blocking work after the closure has started. In that
 /// case [`Self::cancel`] reports [`CancelResult::AlreadyRunning`] through the
@@ -36,8 +40,8 @@ type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 pub struct TokioBlockingTaskHandle<R, E> {
     /// Standard tracked task endpoint used for result and status observation.
     handle: TrackedTask<R, E>,
-    /// Tokio abort handle used to remove queued blocking work after
-    /// cancellation.
+    /// Tokio abort handle used to request cancellation of queued blocking
+    /// work.
     abort_handle: AbortHandle,
     /// Callback that completes queued-task accounting after cancellation wins.
     cancel_queued_task: CancelQueuedTask,
@@ -129,9 +133,11 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
 
     /// Attempts to cancel this task before its blocking closure starts.
     ///
-    /// When cancellation wins the pending-state race, this method also aborts
-    /// the Tokio `spawn_blocking` task so queued work is dropped without
-    /// waiting for an available blocking thread.
+    /// When cancellation wins the pending-state race, this method publishes the
+    /// cancellation result, completes service-side queued accounting, and asks
+    /// Tokio to abort the queued `spawn_blocking` task. Tokio performs that
+    /// cleanup asynchronously, so this method and awaiting this handle do not
+    /// wait for the queued closure or its captures to be dropped.
     ///
     /// # Returns
     ///
