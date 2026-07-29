@@ -26,18 +26,20 @@ use qubit_executor::{
 use qubit_tokio_executor::TokioExecutorService;
 
 struct DropProbe {
-    dropped: Arc<AtomicBool>,
+    dropped_tx: mpsc::Sender<()>,
 }
 
 impl DropProbe {
-    fn new(dropped: Arc<AtomicBool>) -> Self {
-        Self { dropped }
+    /// Creates a probe that signals when its captured closure is dropped.
+    fn new(dropped_tx: mpsc::Sender<()>) -> Self {
+        Self { dropped_tx }
     }
 }
 
 impl Drop for DropProbe {
+    /// Signals that the queued closure has been destroyed.
     fn drop(&mut self) {
-        self.dropped.store(true, Ordering::Release);
+        let _ = self.dropped_tx.send(());
     }
 }
 
@@ -172,8 +174,8 @@ fn test_tokio_task_handle_cancel_allows_termination_before_queued_closure_runs()
         let service = TokioExecutorService::new();
         let ran = Arc::new(AtomicBool::new(false));
         let ran_for_task = Arc::clone(&ran);
-        let dropped = Arc::new(AtomicBool::new(false));
-        let probe = DropProbe::new(Arc::clone(&dropped));
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let probe = DropProbe::new(dropped_tx);
         let handle = service
             .submit_tracked(move || {
                 let _probe = &probe;
@@ -192,7 +194,9 @@ fn test_tokio_task_handle_cancel_allows_termination_before_queued_closure_runs()
             .send(())
             .expect("blocking task should receive release signal");
         blocker.await.expect("blocking slot task should finish");
-        assert!(dropped.load(Ordering::Acquire));
+        dropped_rx.recv_timeout(Duration::from_secs(1)).expect(
+            "cancelled queued closure should be dropped after Tokio drains it",
+        );
         assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
     });
 }
