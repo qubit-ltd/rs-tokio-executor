@@ -7,6 +7,10 @@
 // =============================================================================
 use std::{
     io,
+    panic::{
+        AssertUnwindSafe,
+        catch_unwind,
+    },
     sync::mpsc,
     time::Duration,
 };
@@ -72,6 +76,20 @@ async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
     handle.await.expect("task should complete successfully");
     assert!(service.is_not_running());
     assert!(service.is_terminated());
+}
+
+#[tokio::test]
+async fn test_tokio_executor_service_wait_termination_timeout_rejects_overflow()
+{
+    let service = TokioExecutorService::new();
+    service.shutdown();
+    service.wait_termination();
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        service.wait_termination_timeout(Duration::MAX)
+    }));
+
+    assert!(result.is_err());
 }
 
 #[tokio::test]

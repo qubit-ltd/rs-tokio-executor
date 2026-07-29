@@ -15,7 +15,6 @@ use std::{
     time::Duration,
 };
 
-use qubit_clock::TimeError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::ParkingLotMonitor;
 use tokio::{
@@ -218,10 +217,9 @@ impl TokioExecutorServiceState {
 
     /// Blocks until the service has reached termination.
     pub(crate) fn wait_termination(&self) {
-        self.task_counts.wait_until(
-            |counts| self.is_not_running() && counts.is_empty(),
-            |_counts| {},
-        );
+        self.task_counts.wait_until_ready(|counts| {
+            self.is_not_running() && counts.is_empty()
+        });
     }
 
     /// Waits until termination or the total timeout expires.
@@ -232,10 +230,6 @@ impl TokioExecutorServiceState {
                 self.is_not_running() && counts.is_empty()
             }) {
             Ok(result) => result.is_ready(),
-            Err(TimeError::InstantOverflow) => {
-                self.wait_termination();
-                true
-            }
             Err(error) => {
                 panic!("Tokio executor termination wait failed: {error}")
             }
