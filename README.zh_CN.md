@@ -31,7 +31,7 @@ Qubit Tokio Executor 将 Qubit executor 抽象适配到 Tokio。它为通过 `to
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.8"
+qubit-tokio-executor = "0.9"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
