@@ -5,7 +5,10 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::io;
+use std::{
+    io,
+    time::Duration,
+};
 
 use qubit_executor::{
     SubmissionError,
@@ -40,6 +43,38 @@ async fn test_tokio_io_executor_service_shutdown_waits_for_task_handles() {
     service.shutdown();
     handle.await.expect("task should complete successfully");
     assert!(service.is_not_running());
+    assert!(service.is_terminated());
+}
+
+#[tokio::test]
+async fn test_tokio_io_executor_service_await_termination_waits_for_task_completion()
+ {
+    let service = TokioIoExecutorService::new();
+    let (release_tx, release_rx) = oneshot::channel::<()>();
+
+    let handle = service
+        .spawn(async move {
+            release_rx.await.expect("release signal should arrive");
+            Ok::<(), io::Error>(())
+        })
+        .expect("service should accept task");
+    service.shutdown();
+
+    let waiting_service = service.clone();
+    let waiter = tokio::spawn(async move {
+        waiting_service.await_termination().await;
+    });
+    tokio::task::yield_now().await;
+    assert!(!waiter.is_finished());
+
+    release_tx
+        .send(())
+        .expect("waiting task should receive release signal");
+    handle.await.expect("task should complete successfully");
+    tokio::time::timeout(Duration::from_secs(1), waiter)
+        .await
+        .expect("termination waiter should be notified")
+        .expect("termination waiter should not panic");
     assert!(service.is_terminated());
 }
 

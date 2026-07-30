@@ -149,9 +149,19 @@ impl TokioIoExecutorServiceState {
     }
 
     /// Waits until shutdown has completed and all accepted tasks are gone.
+    ///
+    /// Registers the next notification before observing lifecycle state so an
+    /// adjacent termination transition cannot be missed.
     pub(crate) async fn await_termination(&self) {
-        while self.lifecycle() != ExecutorServiceLifecycle::Terminated {
-            self.termination_notify.notified().await;
+        let notified = self.termination_notify.notified();
+        tokio::pin!(notified);
+        loop {
+            notified.as_mut().enable();
+            if self.lifecycle() == ExecutorServiceLifecycle::Terminated {
+                return;
+            }
+            notified.as_mut().await;
+            notified.set(self.termination_notify.notified());
         }
     }
 }
