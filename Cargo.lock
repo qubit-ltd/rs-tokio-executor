@@ -164,7 +164,9 @@ checksum = "59f10e916324739b811520fbfb24746f4822ad9ea1adb53c79fc04b7c090e5ed"
 
 [[package]]
 name = "qubit-lock"
-version = "0.13.0"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c5f8269c5d3724894dd39b34daf14a14ee6eeb693f9e6a803aea0aacaae56c1"
 dependencies = [
  "parking_lot",
  "qubit-clock",
