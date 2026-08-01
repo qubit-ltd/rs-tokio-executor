@@ -5,7 +5,11 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{future::Future, panic, sync::Arc};
+use std::{
+    future::Future,
+    panic,
+    sync::Arc,
+};
 
 use qubit_dcl::ExecutionOutcome;
 use qubit_executor::TaskExecutionError;
@@ -14,7 +18,11 @@ use crate::TokioTaskHandle;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
-use qubit_executor::service::{ExecutorServiceLifecycle, StopReport, SubmissionError};
+use qubit_executor::service::{
+    ExecutorServiceLifecycle,
+    StopReport,
+    SubmissionError,
+};
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///
@@ -71,7 +79,10 @@ impl TokioIoExecutorService {
     /// requested before the task is accepted. Returns
     /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
     /// entered into a Tokio runtime.
-    pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
+    pub fn spawn<F, R, E>(
+        &self,
+        future: F,
+    ) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
         R: Send + 'static,
@@ -79,25 +90,29 @@ impl TokioIoExecutorService {
     {
         ensure_tokio_runtime_entered()?;
 
-        let (marker, guard) =
-            match self
-                .admission_executor
-                .run(self.state.submission_lock(), || {
-                    if self.state.is_not_running() {
-                        return Err(SubmissionError::Shutdown);
-                    }
-                    self.state.active_tasks.inc();
+        let (marker, guard) = match self.admission_executor.run(
+            self.state.submission_lock(),
+            || {
+                if self.state.is_not_running() {
+                    return Err(SubmissionError::Shutdown);
+                }
+                self.state.active_tasks.inc();
 
-                    let marker = Arc::new(());
-                    let guard =
-                        TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
-                    Ok((marker, guard))
-                }) {
-                ExecutionOutcome::Success(context) => Ok(context),
-                ExecutionOutcome::ConditionNotMet => Err(SubmissionError::Shutdown),
-                ExecutionOutcome::TaskFailed(error) => Err(error),
-                ExecutionOutcome::Panicked(panic) => panic::resume_unwind(panic.into_payload()),
-            }?;
+                let marker = Arc::new(());
+                let guard = TokioIoServiceTaskGuard::new(
+                    Arc::clone(&self.state),
+                    Arc::clone(&marker),
+                );
+                Ok((marker, guard))
+            },
+        ) {
+            ExecutionOutcome::Success(context) => Ok(context),
+            ExecutionOutcome::ConditionNotMet => Err(SubmissionError::Shutdown),
+            ExecutionOutcome::TaskFailed(error) => Err(error),
+            ExecutionOutcome::Panicked(panic) => {
+                panic::resume_unwind(panic.into_payload())
+            }
+        }?;
 
         let handle = tokio::spawn(async move {
             let _guard = guard;

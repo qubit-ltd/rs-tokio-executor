@@ -8,13 +8,19 @@
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
 use std::{
-    sync::{Arc, atomic::AtomicU8},
+    sync::{
+        Arc,
+        atomic::AtomicU8,
+    },
     time::Duration,
 };
 
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::ParkingLotMonitor;
-use tokio::{sync::Notify, task::AbortHandle};
+use tokio::{
+    sync::Notify,
+    task::AbortHandle,
+};
 
 use crate::executor_service_lifecycle_bits;
 
@@ -156,8 +162,12 @@ impl TokioExecutorServiceState {
     /// * `handle` - Tokio abort handle for the accepted task.
     /// * `cancel` - Hook that publishes queued-task cancellation and reports
     ///   whether queued service accounting was actually cancelled.
-    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
-    where
+    pub(crate) fn register_abort_handle<F>(
+        &self,
+        marker: Arc<()>,
+        handle: AbortHandle,
+        cancel: F,
+    ) where
         F: FnOnce() -> bool + Send + 'static,
     {
         let mut handles = self.lock_abort_handles();
@@ -211,8 +221,9 @@ impl TokioExecutorServiceState {
 
     /// Blocks until the service has reached termination.
     pub(crate) fn wait_termination(&self) {
-        self.task_counts
-            .wait_until_ready(|counts| self.is_not_running() && counts.is_empty());
+        self.task_counts.wait_until_ready(|counts| {
+            self.is_not_running() && counts.is_empty()
+        });
     }
 
     /// Waits until termination or the total timeout expires.
@@ -259,7 +270,8 @@ impl TokioExecutorServiceState {
 
     /// Returns whether shutdown or stop has been requested.
     pub(crate) fn is_not_running(&self) -> bool {
-        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
+        executor_service_lifecycle_bits::load(&self.lifecycle)
+            != ExecutorServiceLifecycle::Running
     }
 
     /// Marks the service as shutting down.
