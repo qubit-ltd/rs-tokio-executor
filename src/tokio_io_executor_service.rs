@@ -53,9 +53,9 @@ impl TokioIoExecutorService {
     pub fn new() -> Self {
         let state = Arc::new(TokioIoExecutorServiceState::default());
         let admission_state = Arc::clone(&state);
-        let admission_executor = qubit_dcl::DclExecutor::builder()
-            .when(move || !admission_state.is_not_running())
-            .build();
+        let admission_executor = qubit_dcl::DclExecutor::new(move || {
+            !admission_state.is_not_running()
+        });
         Self {
             state,
             admission_executor,
