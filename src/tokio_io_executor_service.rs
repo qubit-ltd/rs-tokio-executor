@@ -7,7 +7,6 @@
 // =============================================================================
 use std::{
     future::Future,
-    panic,
     sync::Arc,
 };
 
@@ -109,9 +108,6 @@ impl TokioIoExecutorService {
             ExecutionOutcome::Success(context) => Ok(context),
             ExecutionOutcome::ConditionNotMet => Err(SubmissionError::Shutdown),
             ExecutionOutcome::TaskFailed(error) => Err(error),
-            ExecutionOutcome::Panicked(panic) => {
-                panic::resume_unwind(panic.into_payload())
-            }
         }?;
 
         let handle = tokio::spawn(async move {
