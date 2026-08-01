@@ -137,6 +137,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "qubit-dcl"
+version = "0.11.0"
+dependencies = [
+ "qubit-lock",
+]
+
+[[package]]
 name = "qubit-executor"
 version = "0.8.0"
 dependencies = [
@@ -184,7 +191,9 @@ dependencies = [
 name = "qubit-tokio-executor"
 version = "0.9.0"
 dependencies = [
+ "parking_lot",
  "qubit-atomic",
+ "qubit-dcl",
  "qubit-executor",
  "qubit-function",
  "qubit-lock",
