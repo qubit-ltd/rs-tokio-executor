@@ -5,7 +5,6 @@
 // =============================================================================
 use std::{
     future::Future,
-    panic,
     pin::Pin,
     sync::Arc,
     time::Duration,
@@ -117,9 +116,6 @@ impl TokioExecutorService {
             ExecutionOutcome::Success(context) => Ok(context),
             ExecutionOutcome::ConditionNotMet => Err(SubmissionError::Shutdown),
             ExecutionOutcome::TaskFailed(error) => Err(error),
-            ExecutionOutcome::Panicked(panic) => {
-                panic::resume_unwind(panic.into_payload())
-            }
         }
     }
 

@@ -35,7 +35,7 @@ doctest = true
 tokio = { version = "1.52", features = ["rt", "sync"] }
 
 parking_lot = "0.12"
-qubit-dcl = { version = "0.11", path = "../rs-dcl" }
+qubit-dcl = { version = "0.12", path = "../rs-dcl" }
 qubit-atomic = "0.13"
 qubit-function = "0.16"
 qubit-executor = { version = "0.8", path = "../rs-executor" }
