@@ -3,15 +3,30 @@
 //
 //    SPDX-License-Identifier: Apache-2.0
 // =============================================================================
-use std::{future::Future, panic, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    panic,
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 
 use qubit_dcl::ExecutionOutcome;
 use qubit_executor::TaskHandle;
 use qubit_executor::service::{
-    ExecutorService, ExecutorServiceLifecycle, StopReport, SubmissionError,
+    ExecutorService,
+    ExecutorServiceLifecycle,
+    StopReport,
+    SubmissionError,
 };
-use qubit_executor::task::spi::{TaskEndpointPair, TaskRunner};
-use qubit_function::{Callable, Runnable};
+use qubit_executor::task::spi::{
+    TaskEndpointPair,
+    TaskRunner,
+};
+use qubit_function::{
+    Callable,
+    Runnable,
+};
 use tokio::task::AbortHandle;
 
 use crate::TokioBlockingTaskHandle;
@@ -19,7 +34,9 @@ use crate::tokio_executor_service_state::TokioExecutorServiceState;
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
 use crate::tokio_task_slot_cancellation::{
-    cancel_unstarted_task_slot_if_queued, share_task_slot, take_task_slot,
+    cancel_unstarted_task_slot_if_queued,
+    share_task_slot,
+    take_task_slot,
 };
 
 /// Tokio-backed service for submitted blocking tasks.
@@ -91,14 +108,18 @@ impl TokioExecutorService {
                 self.state.accept_task();
 
                 let marker = Arc::new(());
-                let guard =
-                    TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+                let guard = TokioServiceTaskGuard::new(
+                    Arc::clone(&self.state),
+                    Arc::clone(&marker),
+                );
                 Ok((marker, guard))
             }) {
             ExecutionOutcome::Success(context) => Ok(context),
             ExecutionOutcome::ConditionNotMet => Err(SubmissionError::Shutdown),
             ExecutionOutcome::TaskFailed(error) => Err(error),
-            ExecutionOutcome::Panicked(panic) => panic::resume_unwind(panic.into_payload()),
+            ExecutionOutcome::Panicked(panic) => {
+                panic::resume_unwind(panic.into_payload())
+            }
         }
     }
 
@@ -194,7 +215,10 @@ impl ExecutorService for TokioExecutorService {
     /// requested before the task is accepted. Returns
     /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
     /// entered into a Tokio runtime.
-    fn submit_callable<C, R, E>(&self, task: C) -> Result<Self::ResultHandle<R, E>, SubmissionError>
+    fn submit_callable<C, R, E>(
+        &self,
+        task: C,
+    ) -> Result<Self::ResultHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
@@ -215,7 +239,12 @@ impl ExecutorService for TokioExecutorService {
                     TaskRunner::new(task).run(completion);
                 }
             },
-            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
+            move || {
+                cancel_unstarted_task_slot_if_queued(
+                    &abort_completion,
+                    abort_queued_task,
+                )
+            },
         );
         Ok(handle)
     }
@@ -261,7 +290,12 @@ impl ExecutorService for TokioExecutorService {
                     TaskRunner::new(task).run(completion);
                 }
             },
-            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
+            move || {
+                cancel_unstarted_task_slot_if_queued(
+                    &abort_completion,
+                    abort_queued_task,
+                )
+            },
         );
         Ok(TokioBlockingTaskHandle::new(
             handle,
@@ -333,7 +367,9 @@ impl TokioExecutorService {
     ///
     /// A future that resolves after shutdown or stop has been requested and all
     /// accepted blocking tasks have finished or been aborted before start.
-    pub fn await_termination(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    pub fn await_termination(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             let notified = self.state.terminated_notify.notified();
             tokio::pin!(notified);
