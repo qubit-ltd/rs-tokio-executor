@@ -10,7 +10,6 @@ use std::{
     sync::Arc,
 };
 
-use qubit_dcl::ExecutionOutcome;
 use qubit_executor::TaskExecutionError;
 
 use crate::TokioTaskHandle;
@@ -89,9 +88,9 @@ impl TokioIoExecutorService {
     {
         ensure_tokio_runtime_entered()?;
 
-        let (marker, guard) = match self.admission_executor.run(
-            self.state.submission_lock(),
-            || {
+        let (marker, guard) = self
+            .admission_executor
+            .run(self.state.submission_lock(), || {
                 self.state.active_tasks.inc();
 
                 let marker = Arc::new(());
@@ -100,12 +99,9 @@ impl TokioIoExecutorService {
                     Arc::clone(&marker),
                 );
                 Ok((marker, guard))
-            },
-        ) {
-            ExecutionOutcome::Success(context) => Ok(context),
-            ExecutionOutcome::ConditionNotMet => Err(SubmissionError::Shutdown),
-            ExecutionOutcome::TaskFailed(error) => Err(error),
-        }?;
+            })
+            .into_result()?
+            .ok_or(SubmissionError::Shutdown)?;
 
         let handle = tokio::spawn(async move {
             let _guard = guard;
