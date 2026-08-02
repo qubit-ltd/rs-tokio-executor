@@ -92,9 +92,6 @@ impl TokioIoExecutorService {
         let (marker, guard) = match self.admission_executor.run(
             self.state.submission_lock(),
             || {
-                if self.state.is_not_running() {
-                    return Err(SubmissionError::Shutdown);
-                }
                 self.state.active_tasks.inc();
 
                 let marker = Arc::new(());
