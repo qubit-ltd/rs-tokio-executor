@@ -9,7 +9,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 #[tokio::test]
 async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown()
  {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::default();
     let handle = service
         .spawn(async { Ok::<_, &'static str>(5usize) })
         .expect("io service should accept future");

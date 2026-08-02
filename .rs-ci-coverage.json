@@ -1,0 +1,5 @@
+{
+  "threshold_exempt_files": {
+    "qubit-tokio-executor": ["src/tokio_task_slot_cancellation.rs"]
+  }
+}

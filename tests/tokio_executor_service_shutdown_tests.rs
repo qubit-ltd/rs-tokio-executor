@@ -93,6 +93,23 @@ async fn test_tokio_executor_service_wait_termination_timeout_rejects_overflow()
 }
 
 #[tokio::test]
+async fn test_tokio_executor_service_wait_termination_timeout_reports_pending()
+{
+    let service = TokioExecutorService::new();
+    let handle = service
+        .submit_tracked(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            Ok::<(), io::Error>(())
+        })
+        .expect("service should accept task");
+
+    service.shutdown();
+    assert!(!service.wait_termination_timeout(Duration::from_millis(1)));
+    service.wait_termination();
+    handle.await.expect("task should complete successfully");
+}
+
+#[tokio::test]
 async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_task()
  {
     let service = TokioExecutorService::new();

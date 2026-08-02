@@ -20,7 +20,7 @@ use std::sync::{
 #[tokio::test]
 async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown()
  {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::default();
     let handle = service
         .submit_callable(|| Ok::<_, io::Error>("done".to_owned()))
         .expect("service should accept callable");
