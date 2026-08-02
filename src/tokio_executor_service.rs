@@ -10,7 +10,6 @@ use std::{
     time::Duration,
 };
 
-use qubit_dcl::ExecutionOutcome;
 use qubit_executor::TaskHandle;
 use qubit_executor::service::{
     ExecutorService,
@@ -98,8 +97,7 @@ impl TokioExecutorService {
     fn prepare_blocking_submission(
         &self,
     ) -> Result<(Arc<()>, TokioServiceTaskGuard), SubmissionError> {
-        match self
-            .admission_executor
+        self.admission_executor
             .run(self.state.submission_lock(), || {
                 self.state.accept_task();
 
@@ -109,11 +107,9 @@ impl TokioExecutorService {
                     Arc::clone(&marker),
                 );
                 Ok((marker, guard))
-            }) {
-            ExecutionOutcome::Success(context) => Ok(context),
-            ExecutionOutcome::ConditionNotMet => Err(SubmissionError::Shutdown),
-            ExecutionOutcome::TaskFailed(error) => Err(error),
-        }
+            })
+            .into_result()?
+            .ok_or(SubmissionError::Shutdown)
     }
 
     /// Spawns a queued blocking task and registers its abort hook.
