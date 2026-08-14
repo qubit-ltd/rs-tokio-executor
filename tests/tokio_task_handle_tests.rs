@@ -5,24 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{
-    io,
-    sync::{
-        Arc,
-        atomic::{
-            AtomicBool,
-            Ordering,
-        },
-        mpsc,
-    },
-    time::Duration,
-};
+use std::io;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::time::Duration;
 
+use qubit_executor::CancelResult;
+use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorService;
-use qubit_executor::{
-    CancelResult,
-    TaskExecutionError,
-};
 use qubit_tokio_executor::TokioExecutorService;
 
 struct DropProbe {

@@ -3,39 +3,29 @@
 //
 //    SPDX-License-Identifier: Apache-2.0
 // =============================================================================
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    time::Duration,
-};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
 
 use qubit_executor::TaskHandle;
-use qubit_executor::service::{
-    ExecutorService,
-    ExecutorServiceLifecycle,
-    StopReport,
-    SubmissionError,
-};
-use qubit_executor::task::spi::{
-    TaskEndpointPair,
-    TaskRunner,
-};
-use qubit_function::{
-    Callable,
-    Runnable,
-};
+use qubit_executor::service::ExecutorService;
+use qubit_executor::service::ExecutorServiceLifecycle;
+use qubit_executor::service::StopReport;
+use qubit_executor::service::SubmissionError;
+use qubit_executor::task::spi::TaskEndpointPair;
+use qubit_executor::task::spi::TaskRunner;
+use qubit_function::Callable;
+use qubit_function::Runnable;
 use tokio::task::AbortHandle;
 
 use crate::TokioBlockingTaskHandle;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
-use crate::tokio_task_slot_cancellation::{
-    cancel_unstarted_task_slot_if_queued,
-    share_task_slot,
-    take_task_slot,
-};
+use crate::tokio_task_slot_cancellation::cancel_unstarted_task_slot_if_queued;
+use crate::tokio_task_slot_cancellation::share_task_slot;
+use crate::tokio_task_slot_cancellation::take_task_slot;
 
 /// Tokio-backed service for submitted blocking tasks.
 ///

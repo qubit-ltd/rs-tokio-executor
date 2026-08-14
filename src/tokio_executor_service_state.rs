@@ -5,22 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+use std::time::Duration;
+
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
-use std::{
-    sync::{
-        Arc,
-        atomic::AtomicU8,
-    },
-    time::Duration,
-};
-
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::ParkingLotMonitor;
-use tokio::{
-    sync::Notify,
-    task::AbortHandle,
-};
+use tokio::sync::Notify;
+use tokio::task::AbortHandle;
 
 use crate::executor_service_lifecycle_bits;
 

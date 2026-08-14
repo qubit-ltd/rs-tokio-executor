@@ -5,23 +5,15 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{
-    io,
-    panic::{
-        AssertUnwindSafe,
-        catch_unwind,
-    },
-    sync::mpsc,
-    time::Duration,
-};
+use std::io;
+use std::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
+use std::sync::mpsc;
+use std::time::Duration;
 
-use qubit_executor::{
-    TaskExecutionError,
-    service::{
-        ExecutorService,
-        SubmissionError,
-    },
-};
+use qubit_executor::TaskExecutionError;
+use qubit_executor::service::ExecutorService;
+use qubit_executor::service::SubmissionError;
 use qubit_tokio_executor::TokioExecutorService;
 
 fn ok_unit_task() -> Result<(), io::Error> {

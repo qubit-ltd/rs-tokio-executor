@@ -11,9 +11,7 @@
 //! integration tests can exercise small internal helpers without redirecting
 //! test files to source files.
 
-pub use crate::tokio_task_slot_cancellation::{
-    SharedTaskSlot,
-    cancel_unstarted_task_slot_if_queued,
-    share_task_slot,
-    take_task_slot,
-};
+pub use crate::tokio_task_slot_cancellation::SharedTaskSlot;
+pub use crate::tokio_task_slot_cancellation::cancel_unstarted_task_slot_if_queued;
+pub use crate::tokio_task_slot_cancellation::share_task_slot;
+pub use crate::tokio_task_slot_cancellation::take_task_slot;

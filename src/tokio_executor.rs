@@ -5,17 +5,12 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use qubit_executor::TrackedTask;
+use qubit_executor::executor::Executor;
+use qubit_executor::service::SubmissionError;
+use qubit_executor::task::spi::TaskEndpointPair;
+use qubit_executor::task::spi::TaskRunner;
 use qubit_function::Callable;
-
-use qubit_executor::{
-    TrackedTask,
-    executor::Executor,
-    service::SubmissionError,
-    task::spi::{
-        TaskEndpointPair,
-        TaskRunner,
-    },
-};
 
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
 

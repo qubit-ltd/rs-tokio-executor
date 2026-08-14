@@ -5,22 +5,18 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{
-    future::Future,
-    sync::Arc,
-};
+use std::future::Future;
+use std::sync::Arc;
 
 use qubit_executor::TaskExecutionError;
+use qubit_executor::service::ExecutorServiceLifecycle;
+use qubit_executor::service::StopReport;
+use qubit_executor::service::SubmissionError;
 
 use crate::TokioTaskHandle;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
 use crate::tokio_runtime::ensure_tokio_runtime_entered;
-use qubit_executor::service::{
-    ExecutorServiceLifecycle,
-    StopReport,
-    SubmissionError,
-};
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///

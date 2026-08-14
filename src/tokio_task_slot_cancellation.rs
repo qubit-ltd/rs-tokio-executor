@@ -7,10 +7,8 @@
 // =============================================================================
 use std::sync::Arc;
 
-use qubit_executor::task::spi::{
-    TaskSlot,
-    TaskSlotCell,
-};
+use qubit_executor::task::spi::TaskSlot;
+use qubit_executor::task::spi::TaskSlotCell;
 
 /// Shared runner-side task slot used by service stop and task execution paths.
 pub type SharedTaskSlot<R, E> = Arc<TaskSlotCell<R, E>>;
