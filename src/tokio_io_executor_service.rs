@@ -8,6 +8,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use qubit_dcl::DclExecutor;
 use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_executor::service::StopReport;
@@ -27,7 +28,7 @@ pub struct TokioIoExecutorService {
     /// Shared service state used by all clones of this service.
     state: Arc<TokioIoExecutorServiceState>,
     /// Shared admission gate used for all async submission points.
-    admission_executor: qubit_dcl::DclExecutor,
+    admission_executor: DclExecutor,
 }
 
 impl Default for TokioIoExecutorService {
@@ -48,9 +49,8 @@ impl TokioIoExecutorService {
     pub fn new() -> Self {
         let state = Arc::new(TokioIoExecutorServiceState::default());
         let admission_state = Arc::clone(&state);
-        let admission_executor = qubit_dcl::DclExecutor::new(move || {
-            !admission_state.is_not_running()
-        });
+        let admission_executor =
+            DclExecutor::new(move || !admission_state.is_not_running());
         Self {
             state,
             admission_executor,

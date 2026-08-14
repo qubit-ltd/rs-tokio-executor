@@ -12,6 +12,7 @@ use parking_lot::Mutex;
 use parking_lot::MutexGuard;
 use qubit_atomic::AtomicCount;
 use qubit_executor::service::ExecutorServiceLifecycle;
+use tokio::pin;
 use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 
@@ -154,7 +155,7 @@ impl TokioIoExecutorServiceState {
     /// adjacent termination transition cannot be missed.
     pub(crate) async fn await_termination(&self) {
         let notified = self.termination_notify.notified();
-        tokio::pin!(notified);
+        pin!(notified);
         loop {
             notified.as_mut().enable();
             if self.lifecycle() == ExecutorServiceLifecycle::Terminated {

@@ -11,7 +11,6 @@ use std::time::Duration;
 use qubit_executor::SubmissionError;
 use qubit_executor::TaskExecutionError;
 use qubit_tokio_executor::TokioIoExecutorService;
-use tokio::sync::oneshot;
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
@@ -46,7 +45,7 @@ async fn test_tokio_io_executor_service_shutdown_waits_for_task_handles() {
 async fn test_tokio_io_executor_service_await_termination_waits_for_task_completion()
  {
     let service = TokioIoExecutorService::new();
-    let (release_tx, release_rx) = oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = service
         .spawn(async move {
@@ -115,7 +114,7 @@ async fn test_tokio_io_executor_service_stop_ignores_completed_tasks() {
 #[tokio::test]
 async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
     let service = TokioIoExecutorService::new();
-    let (release_tx, release_rx) = oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = service
         .spawn(async move {
@@ -143,7 +142,7 @@ async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
 async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_tasks()
  {
     let service = TokioIoExecutorService::new();
-    let (release_tx, release_rx) = oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
 
     let pending_handle = service
         .spawn(async move {
