@@ -5,27 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{
-    io,
-    sync::atomic::{
-        AtomicBool,
-        Ordering,
-    },
-};
+use std::io;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
-use qubit_executor::{
-    TaskExecutionError,
-    task::spi::{
-        TaskEndpointPair,
-        TaskRunner,
-    },
-};
-
-use qubit_tokio_executor::testing::{
-    cancel_unstarted_task_slot_if_queued,
-    share_task_slot,
-    take_task_slot,
-};
+use qubit_executor::TaskExecutionError;
+use qubit_executor::task::spi::TaskEndpointPair;
+use qubit_executor::task::spi::TaskRunner;
+use qubit_tokio_executor::testing::cancel_unstarted_task_slot_if_queued;
+use qubit_tokio_executor::testing::share_task_slot;
+use qubit_tokio_executor::testing::take_task_slot;
 
 /// Verifies queued cancellation does not steal a slot whose service accounting
 /// has already moved to running.

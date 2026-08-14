@@ -5,13 +5,11 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
-use std::sync::{
-    Arc,
-    atomic::AtomicU8,
-};
-
 use qubit_atomic::AtomicCount;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use tokio::sync::Notify;

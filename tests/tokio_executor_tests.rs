@@ -7,18 +7,14 @@
 // =============================================================================
 //! Tests for [`TokioExecutor`](qubit_tokio_executor::TokioExecutor).
 
-use std::{
-    io,
-    sync::mpsc,
-    time::Duration,
-};
+use std::io;
+use std::sync::mpsc;
+use std::time::Duration;
 
-use qubit_executor::{
-    CancelResult,
-    Executor,
-    SubmissionError,
-    TaskExecutionError,
-};
+use qubit_executor::CancelResult;
+use qubit_executor::Executor;
+use qubit_executor::SubmissionError;
+use qubit_executor::TaskExecutionError;
 use qubit_tokio_executor::TokioExecutor;
 
 #[tokio::test]

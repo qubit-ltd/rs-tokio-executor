@@ -5,15 +5,11 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{
-    io,
-    time::Duration,
-};
+use std::io;
+use std::time::Duration;
 
-use qubit_executor::{
-    SubmissionError,
-    TaskExecutionError,
-};
+use qubit_executor::SubmissionError;
+use qubit_executor::TaskExecutionError;
 use qubit_tokio_executor::TokioIoExecutorService;
 use tokio::sync::oneshot;
 

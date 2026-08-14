@@ -5,13 +5,9 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::sync::{
-    Arc,
-    atomic::{
-        AtomicU8,
-        Ordering,
-    },
-};
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
 
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 

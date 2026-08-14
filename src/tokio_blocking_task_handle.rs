@@ -7,18 +7,14 @@
 // =============================================================================
 use std::future::IntoFuture;
 
+use qubit_executor::CancelResult;
+use qubit_executor::TaskResult;
+use qubit_executor::TaskStatus;
+use qubit_executor::TrackedTask;
+use qubit_executor::TryGet;
 use qubit_executor::task::TaskHandleFuture;
-use qubit_executor::{
-    CancelResult,
-    TaskResult,
-    TaskStatus,
-    TrackedTask,
-    TryGet,
-    task::spi::{
-        TaskResultHandle,
-        TrackedTaskHandle,
-    },
-};
+use qubit_executor::task::spi::TaskResultHandle;
+use qubit_executor::task::spi::TrackedTaskHandle;
 use tokio::task::AbortHandle;
 
 /// Callback used to finish service-side queued-task accounting.

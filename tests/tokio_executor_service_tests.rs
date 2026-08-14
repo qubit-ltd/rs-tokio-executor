@@ -1,21 +1,13 @@
-use std::{
-    io,
-    panic::AssertUnwindSafe,
-};
+use std::io;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
-use qubit_executor::service::{
-    ExecutorService,
-    ExecutorServiceLifecycle,
-    SubmissionError,
-};
+use qubit_executor::service::ExecutorService;
+use qubit_executor::service::ExecutorServiceLifecycle;
+use qubit_executor::service::SubmissionError;
 use qubit_tokio_executor::TokioExecutorService;
-use std::sync::{
-    Arc,
-    atomic::{
-        AtomicBool,
-        Ordering,
-    },
-};
 
 #[tokio::test]
 async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown()

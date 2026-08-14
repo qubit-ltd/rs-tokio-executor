@@ -5,25 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{
-        Context,
-        Poll,
-    },
-};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
-use tokio::task::{
-    JoinError,
-    JoinHandle,
-};
-
-use qubit_executor::{
-    CancelResult,
-    TaskExecutionError,
-    TaskResult,
-};
+use qubit_executor::CancelResult;
+use qubit_executor::TaskExecutionError;
+use qubit_executor::TaskResult;
+use tokio::task::JoinError;
+use tokio::task::JoinHandle;
 
 /// Async handle returned by Tokio-backed executor services.
 ///

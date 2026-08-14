@@ -1,9 +1,7 @@
 use std::panic::AssertUnwindSafe;
 
-use qubit_executor::{
-    SubmissionError,
-    service::ExecutorServiceLifecycle,
-};
+use qubit_executor::SubmissionError;
+use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]
