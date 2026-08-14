@@ -8,6 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use qubit_dcl::DclExecutor;
 use qubit_executor::TaskHandle;
 use qubit_executor::service::ExecutorService;
 use qubit_executor::service::ExecutorServiceLifecycle;
@@ -17,7 +18,9 @@ use qubit_executor::task::spi::TaskEndpointPair;
 use qubit_executor::task::spi::TaskRunner;
 use qubit_function::Callable;
 use qubit_function::Runnable;
+use tokio::pin;
 use tokio::task::AbortHandle;
+use tokio::task::spawn_blocking;
 
 use crate::TokioBlockingTaskHandle;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
@@ -36,7 +39,7 @@ pub struct TokioExecutorService {
     /// Shared service state used by all clones of this service.
     state: Arc<TokioExecutorServiceState>,
     /// Shared admission gate used for all submission points.
-    admission_executor: qubit_dcl::DclExecutor,
+    admission_executor: DclExecutor,
 }
 
 /// Tokio-backed blocking executor service routed through `spawn_blocking`.
@@ -64,9 +67,8 @@ impl TokioExecutorService {
     pub fn new() -> Self {
         let state = Arc::new(TokioExecutorServiceState::default());
         let admission_state = Arc::clone(&state);
-        let admission_executor = qubit_dcl::DclExecutor::new(move || {
-            !admission_state.is_not_running()
-        });
+        let admission_executor =
+            DclExecutor::new(move || !admission_state.is_not_running());
         Self {
             state,
             admission_executor,
@@ -114,7 +116,7 @@ impl TokioExecutorService {
         F: FnOnce() + Send + 'static,
         C: FnOnce() -> bool + Send + 'static,
     {
-        let join_handle = tokio::task::spawn_blocking(move || {
+        let join_handle = spawn_blocking(move || {
             let guard = guard;
             if !guard.mark_started() {
                 return;
@@ -351,7 +353,7 @@ impl TokioExecutorService {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             let notified = self.state.terminated_notify.notified();
-            tokio::pin!(notified);
+            pin!(notified);
             loop {
                 notified.as_mut().enable();
                 if self.is_terminated() {
