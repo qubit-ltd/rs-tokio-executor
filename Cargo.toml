@@ -35,11 +35,11 @@ doctest = true
 tokio = { version = "1.52", features = ["rt", "sync"] }
 
 parking_lot = "0.12"
-qubit-dcl = "0.12"
+qubit-dcl = "0.13"
 qubit-atomic = "0.13"
 qubit-function = "0.16"
 qubit-executor = { version = "0.8", path = "../rs-executor" }
-qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], version = "0.13" }
+qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], version = "0.14" }
 
 [dev-dependencies]
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
