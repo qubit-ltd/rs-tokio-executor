@@ -20,16 +20,14 @@ use qubit_tokio_executor::testing::take_task_slot;
 /// has already moved to running.
 #[test]
 fn test_cancel_unstarted_task_slot_if_queued_keeps_running_slot() {
-    let (handle, slot) =
-        TaskEndpointPair::<usize, io::Error>::new().into_parts();
+    let (handle, slot) = TaskEndpointPair::<usize, io::Error>::new().into_parts();
     slot.accept();
     let slot = share_task_slot(slot);
 
     let cancelled = cancel_unstarted_task_slot_if_queued(&slot, || false);
 
     assert!(!cancelled);
-    let slot =
-        take_task_slot(&slot).expect("running task should keep its slot");
+    let slot = take_task_slot(&slot).expect("running task should keep its slot");
     let ran = AtomicBool::new(false);
     assert!(
         TaskRunner::new(|| {
@@ -46,8 +44,7 @@ fn test_cancel_unstarted_task_slot_if_queued_keeps_running_slot() {
 /// service accounting is still active.
 #[test]
 fn test_cancel_unstarted_task_slot_if_queued_cancels_queued_slot() {
-    let (handle, slot) =
-        TaskEndpointPair::<usize, io::Error>::new().into_parts();
+    let (handle, slot) = TaskEndpointPair::<usize, io::Error>::new().into_parts();
     slot.accept();
     let slot = share_task_slot(slot);
 
@@ -62,12 +59,10 @@ fn test_cancel_unstarted_task_slot_if_queued_cancels_queued_slot() {
 /// took from shared storage.
 #[test]
 fn test_cancel_unstarted_task_slot_if_queued_allows_missing_slot() {
-    let (_handle, slot) =
-        TaskEndpointPair::<usize, io::Error>::new().into_parts();
+    let (_handle, slot) = TaskEndpointPair::<usize, io::Error>::new().into_parts();
     slot.accept();
     let slot = share_task_slot(slot);
-    let _taken =
-        take_task_slot(&slot).expect("test should take the slot first");
+    let _taken = take_task_slot(&slot).expect("test should take the slot first");
 
     let cancelled = cancel_unstarted_task_slot_if_queued(&slot, || true);
 

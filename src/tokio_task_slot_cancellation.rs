@@ -37,9 +37,7 @@ pub fn share_task_slot<R, E>(slot: TaskSlot<R, E>) -> SharedTaskSlot<R, E> {
 /// # Returns
 ///
 /// `Some(TaskSlot)` if this call won the slot ownership race, otherwise `None`.
-pub fn take_task_slot<R, E>(
-    slot: &SharedTaskSlot<R, E>,
-) -> Option<TaskSlot<R, E>> {
+pub fn take_task_slot<R, E>(slot: &SharedTaskSlot<R, E>) -> Option<TaskSlot<R, E>> {
     slot.take()
 }
 
@@ -57,10 +55,7 @@ pub fn take_task_slot<R, E>(
 /// # Returns
 ///
 /// `true` if queued service accounting was completed by this call.
-pub fn cancel_unstarted_task_slot_if_queued<R, E, F>(
-    slot: &SharedTaskSlot<R, E>,
-    finish_queued: F,
-) -> bool
+pub fn cancel_unstarted_task_slot_if_queued<R, E, F>(slot: &SharedTaskSlot<R, E>, finish_queued: F) -> bool
 where
     F: FnOnce() -> bool,
 {

@@ -25,8 +25,5 @@ use qubit_tokio_executor::TokioExecutor;
 fn test_tokio_runtime_check_rejects_submission_without_runtime() {
     let result = TokioExecutor.call(|| Ok::<usize, io::Error>(42));
 
-    assert!(matches!(
-        result,
-        Err(SubmissionError::WorkerSpawnFailed { .. })
-    ));
+    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
 }

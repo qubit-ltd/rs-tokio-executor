@@ -108,14 +108,12 @@ impl TokioExecutorServiceState {
 
     /// Records a newly accepted task as queued.
     pub(crate) fn accept_task(&self) {
-        self.task_counts
-            .with_write(TokioExecutorTaskCounts::accept_task);
+        self.task_counts.with_write(TokioExecutorTaskCounts::accept_task);
     }
 
     /// Moves a task from queued to running.
     pub(crate) fn mark_task_started(&self) {
-        self.task_counts
-            .with_write(TokioExecutorTaskCounts::mark_started);
+        self.task_counts.with_write(TokioExecutorTaskCounts::mark_started);
     }
 
     /// Records task completion or queued-task abortion.
@@ -140,8 +138,7 @@ impl TokioExecutorServiceState {
     /// A tuple whose first element is the queued count and second element is
     /// the running count.
     pub(crate) fn task_count_snapshot(&self) -> (usize, usize) {
-        self.task_counts
-            .with_read(|counts| (counts.queued, counts.running))
+        self.task_counts.with_read(|counts| (counts.queued, counts.running))
     }
 
     /// Registers an abort handle if the task has not already finished.
@@ -156,12 +153,8 @@ impl TokioExecutorServiceState {
     /// * `handle` - Tokio abort handle for the accepted task.
     /// * `cancel` - Hook that publishes queued-task cancellation and reports
     ///   whether queued service accounting was actually cancelled.
-    pub(crate) fn register_abort_handle<F>(
-        &self,
-        marker: Arc<()>,
-        handle: AbortHandle,
-        cancel: F,
-    ) where
+    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
+    where
         F: FnOnce() -> bool + Send + 'static,
     {
         let mut handles = self.lock_abort_handles();
@@ -215,18 +208,16 @@ impl TokioExecutorServiceState {
 
     /// Blocks until the service has reached termination.
     pub(crate) fn wait_termination(&self) {
-        self.task_counts.wait_until_ready(|counts| {
-            self.is_not_running() && counts.is_empty()
-        });
+        self.task_counts
+            .wait_until_ready(|counts| self.is_not_running() && counts.is_empty());
     }
 
     /// Waits until termination or the total timeout expires.
     pub(crate) fn wait_termination_timeout(&self, timeout: Duration) -> bool {
         match self
             .task_counts
-            .wait_until_ready_with_total_timeout(timeout, |counts| {
-                self.is_not_running() && counts.is_empty()
-            }) {
+            .wait_until_ready_with_total_timeout(timeout, |counts| self.is_not_running() && counts.is_empty())
+        {
             Ok(result) => result.is_ready(),
             Err(error) => {
                 panic!("Tokio executor termination wait failed: {error}")
@@ -252,9 +243,7 @@ impl TokioExecutorServiceState {
     /// Returns the observed lifecycle state.
     pub(crate) fn lifecycle(&self) -> ExecutorServiceLifecycle {
         let lifecycle = executor_service_lifecycle_bits::load(&self.lifecycle);
-        let has_no_tasks = self
-            .task_counts
-            .with_read(TokioExecutorTaskCounts::is_empty);
+        let has_no_tasks = self.task_counts.with_read(TokioExecutorTaskCounts::is_empty);
         if lifecycle != ExecutorServiceLifecycle::Running && has_no_tasks {
             ExecutorServiceLifecycle::Terminated
         } else {
@@ -264,8 +253,7 @@ impl TokioExecutorServiceState {
 
     /// Returns whether shutdown or stop has been requested.
     pub(crate) fn is_not_running(&self) -> bool {
-        executor_service_lifecycle_bits::load(&self.lifecycle)
-            != ExecutorServiceLifecycle::Running
+        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
     }
 
     /// Marks the service as shutting down.

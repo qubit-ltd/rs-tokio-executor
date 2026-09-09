@@ -23,8 +23,7 @@ use qubit_tokio_executor::testing::take_task_slot;
 
 #[test]
 fn test_testing_reexports_share_and_take_task_slots() {
-    let (_handle, slot) =
-        TaskEndpointPair::<usize, io::Error>::new().into_parts();
+    let (_handle, slot) = TaskEndpointPair::<usize, io::Error>::new().into_parts();
     slot.accept();
     let shared_slot = share_task_slot(slot);
 
