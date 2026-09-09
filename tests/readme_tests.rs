@@ -17,8 +17,7 @@ use std::fs;
 ///
 /// The file contents.
 fn read_project_file(path: &str) -> String {
-    fs::read_to_string(path)
-        .unwrap_or_else(|err| panic!("failed to read {path}: {err}"))
+    fs::read_to_string(path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"))
 }
 
 /// Extracts the crate version from `Cargo.toml`.
@@ -39,8 +38,7 @@ fn package_version() -> String {
 #[test]
 fn test_readmes_use_current_crate_version() {
     let version = package_version();
-    let minor_version = minor_series(&version)
-        .expect("package version should have major.minor");
+    let minor_version = minor_series(&version).expect("package version should have major.minor");
     let dependency = format!("qubit-tokio-executor = \"{minor_version}\"");
     let readme_en = read_project_file("README.md");
     let readme_zh = read_project_file("README.zh_CN.md");
@@ -84,9 +82,6 @@ fn test_readmes_limit_await_termination_to_blocking_service() {
     let readme_zh = read_project_file("README.zh_CN.md");
 
     for readme in [&readme_en, &readme_zh] {
-        assert_eq!(
-            1,
-            readme.matches("service.await_termination().await").count()
-        );
+        assert_eq!(1, readme.matches("service.await_termination().await").count());
     }
 }

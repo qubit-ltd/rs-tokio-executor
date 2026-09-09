@@ -5,8 +5,7 @@ use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]
-async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown()
- {
+async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown() {
     let service = TokioIoExecutorService::default();
     let handle = service
         .spawn(async { Ok::<_, &'static str>(5usize) })
@@ -41,8 +40,7 @@ async fn test_tokio_io_executor_service_lifecycle_accessors() {
 }
 
 #[test]
-fn test_tokio_io_executor_service_spawn_without_runtime_returns_submission_error()
- {
+fn test_tokio_io_executor_service_spawn_without_runtime_returns_submission_error() {
     let service = TokioIoExecutorService::new();
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -50,10 +48,7 @@ fn test_tokio_io_executor_service_spawn_without_runtime_returns_submission_error
     }))
     .expect("tokio IO executor service should not panic without a runtime");
 
-    assert!(matches!(
-        result,
-        Err(SubmissionError::WorkerSpawnFailed { .. })
-    ));
+    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
     assert!(service.is_running());
 
     service.shutdown();

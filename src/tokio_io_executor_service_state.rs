@@ -67,11 +67,7 @@ impl TokioIoExecutorServiceState {
     ///
     /// * `marker` - Service-local task marker shared with the lifecycle guard.
     /// * `handle` - Tokio abort handle for the accepted task.
-    pub(crate) fn register_abort_handle(
-        &self,
-        marker: Arc<()>,
-        handle: AbortHandle,
-    ) {
+    pub(crate) fn register_abort_handle(&self, marker: Arc<()>, handle: AbortHandle) {
         let mut handles = self.lock_abort_handles();
         if !handle.is_finished() {
             handles.push(TrackedAbortHandle { marker, handle });
@@ -117,9 +113,7 @@ impl TokioIoExecutorServiceState {
     /// Returns the observed lifecycle state.
     pub(crate) fn lifecycle(&self) -> ExecutorServiceLifecycle {
         let lifecycle = executor_service_lifecycle_bits::load(&self.lifecycle);
-        if lifecycle != ExecutorServiceLifecycle::Running
-            && self.active_tasks.is_zero()
-        {
+        if lifecycle != ExecutorServiceLifecycle::Running && self.active_tasks.is_zero() {
             ExecutorServiceLifecycle::Terminated
         } else {
             lifecycle
@@ -128,8 +122,7 @@ impl TokioIoExecutorServiceState {
 
     /// Returns whether shutdown or stop has been requested.
     pub(crate) fn is_not_running(&self) -> bool {
-        executor_service_lifecycle_bits::load(&self.lifecycle)
-            != ExecutorServiceLifecycle::Running
+        executor_service_lifecycle_bits::load(&self.lifecycle) != ExecutorServiceLifecycle::Running
     }
 
     /// Marks the service as shutting down.

@@ -49,8 +49,7 @@ impl TokioIoExecutorService {
     pub fn new() -> Self {
         let state = Arc::new(TokioIoExecutorServiceState::default());
         let admission_state = Arc::clone(&state);
-        let admission_executor =
-            DclExecutor::new(move || !admission_state.is_not_running());
+        let admission_executor = DclExecutor::new(move || !admission_state.is_not_running());
         Self {
             state,
             admission_executor,
@@ -73,10 +72,7 @@ impl TokioIoExecutorService {
     /// requested before the task is accepted. Returns
     /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
     /// entered into a Tokio runtime.
-    pub fn spawn<F, R, E>(
-        &self,
-        future: F,
-    ) -> Result<TokioTaskHandle<R, E>, SubmissionError>
+    pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
         R: Send + 'static,
@@ -90,10 +86,7 @@ impl TokioIoExecutorService {
                 self.state.active_tasks.inc();
 
                 let marker = Arc::new(());
-                let guard = TokioIoServiceTaskGuard::new(
-                    Arc::clone(&self.state),
-                    Arc::clone(&marker),
-                );
+                let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
                 Ok((marker, guard))
             })
             .into_result()?
@@ -103,8 +96,7 @@ impl TokioIoExecutorService {
             let _guard = guard;
             future.await.map_err(TaskExecutionError::Failed)
         });
-        self.state
-            .register_abort_handle(marker, handle.abort_handle());
+        self.state.register_abort_handle(marker, handle.abort_handle());
         Ok(TokioTaskHandle::new(handle))
     }
 

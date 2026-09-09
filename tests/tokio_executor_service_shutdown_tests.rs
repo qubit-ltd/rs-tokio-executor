@@ -71,22 +71,18 @@ async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
 }
 
 #[tokio::test]
-async fn test_tokio_executor_service_wait_termination_timeout_rejects_overflow()
-{
+async fn test_tokio_executor_service_wait_termination_timeout_rejects_overflow() {
     let service = TokioExecutorService::new();
     service.shutdown();
     service.wait_termination();
 
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        service.wait_termination_timeout(Duration::MAX)
-    }));
+    let result = catch_unwind(AssertUnwindSafe(|| service.wait_termination_timeout(Duration::MAX)));
 
     assert!(result.is_err());
 }
 
 #[tokio::test]
-async fn test_tokio_executor_service_wait_termination_timeout_reports_pending()
-{
+async fn test_tokio_executor_service_wait_termination_timeout_reports_pending() {
     let service = TokioExecutorService::new();
     let handle = service
         .submit_tracked(|| {
@@ -102,20 +98,15 @@ async fn test_tokio_executor_service_wait_termination_timeout_reports_pending()
 }
 
 #[tokio::test]
-async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_task()
- {
+async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_task() {
     let service = TokioExecutorService::new();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
 
     let handle = service
         .submit_callable(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
             Ok::<usize, io::Error>(42)
         })
         .expect("service should accept task");
@@ -140,10 +131,7 @@ async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_
     assert_eq!(report.cancelled, 0);
     assert!(service.is_not_running());
     assert!(service.is_terminated());
-    assert_eq!(
-        handle.await.expect("running blocking task should finish"),
-        42
-    );
+    assert_eq!(handle.await.expect("running blocking task should finish"), 42);
 }
 
 #[test]
@@ -159,12 +147,8 @@ fn test_tokio_executor_service_stop_cancels_queued_detached_task() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
         });
         started_rx
             .recv_timeout(Duration::from_secs(1))
@@ -199,12 +183,8 @@ fn test_tokio_executor_service_stop_cancels_queued_tracked_task() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
         });
         started_rx
             .recv_timeout(Duration::from_secs(1))
@@ -250,20 +230,15 @@ async fn test_tokio_executor_service_stop_ignores_completed_tasks() {
 }
 
 #[tokio::test]
-async fn test_tokio_executor_service_completion_keeps_waiting_for_remaining_tasks()
- {
+async fn test_tokio_executor_service_completion_keeps_waiting_for_remaining_tasks() {
     let service = TokioExecutorService::new();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
 
     let blocked_handle = service
         .submit_tracked(move || {
-            started_tx
-                .send(())
-                .expect("test should receive blocking start signal");
-            release_rx
-                .recv()
-                .expect("blocking task should receive release signal");
+            started_tx.send(()).expect("test should receive blocking start signal");
+            release_rx.recv().expect("blocking task should receive release signal");
             Ok::<(), io::Error>(())
         })
         .expect("service should accept blocked task");
@@ -289,9 +264,7 @@ async fn test_tokio_executor_service_completion_keeps_waiting_for_remaining_task
     release_tx
         .send(())
         .expect("blocking task should receive release signal");
-    blocked_handle
-        .await
-        .expect("blocked task should complete successfully");
+    blocked_handle.await.expect("blocked task should complete successfully");
     service.wait_termination();
     assert!(service.is_terminated());
 }

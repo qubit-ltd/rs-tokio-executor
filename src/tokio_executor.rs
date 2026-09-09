@@ -106,10 +106,7 @@ impl Executor for TokioExecutor {
     ///
     /// Returns [`SubmissionError::WorkerSpawnFailed`] when the current thread
     /// is not entered into a Tokio runtime.
-    fn call<C, R, E>(
-        &self,
-        task: C,
-    ) -> Result<TrackedTask<R, E>, SubmissionError>
+    fn call<C, R, E>(&self, task: C) -> Result<TrackedTask<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
