@@ -36,9 +36,9 @@ tokio = { version = "1.52", features = ["rt", "sync"] }
 
 parking_lot = "0.12"
 qubit-dcl = "0.13"
-qubit-atomic = "0.13"
-qubit-function = "0.16"
-qubit-executor = { version = "0.8", path = "../rs-executor" }
+qubit-atomic = "0.17"
+qubit-function = "0.18"
+qubit-executor = { path = "../rs-executor" }
 qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], version = "0.14" }
 
 [dev-dependencies]
