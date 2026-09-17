@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::time::Duration;
+use std::time::Instant;
 
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
@@ -214,13 +215,25 @@ impl TokioExecutorServiceState {
 
     /// Waits until termination or the total timeout expires.
     pub(crate) fn wait_termination_timeout(&self, timeout: Duration) -> bool {
-        match self
-            .task_counts
-            .wait_until_ready_with_total_timeout(timeout, |counts| self.is_not_running() && counts.is_empty())
-        {
-            Ok(result) => result.is_ready(),
-            Err(error) => {
-                panic!("Tokio executor termination wait failed: {error}")
+        let started = Instant::now();
+        loop {
+            if self.is_not_running() && self.task_counts.with_read(TokioExecutorTaskCounts::is_empty) {
+                return true;
+            }
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return false;
+            }
+            match self
+                .task_counts
+                .wait_until_ready_with_total_timeout(remaining.min(Duration::from_secs(3600)), |counts| {
+                    self.is_not_running() && counts.is_empty()
+                }) {
+                Ok(result) if result.is_ready() => return true,
+                Ok(_) => {}
+                Err(_) => {
+                    return self.is_not_running() && self.task_counts.with_read(TokioExecutorTaskCounts::is_empty);
+                }
             }
         }
     }

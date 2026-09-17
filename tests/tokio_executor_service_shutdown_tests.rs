@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::io;
-use std::panic::AssertUnwindSafe;
-use std::panic::catch_unwind;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -71,14 +69,12 @@ async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
 }
 
 #[tokio::test]
-async fn test_tokio_executor_service_wait_termination_timeout_rejects_overflow() {
+async fn test_tokio_executor_service_wait_termination_timeout_handles_max_duration() {
     let service = TokioExecutorService::new();
     service.shutdown();
     service.wait_termination();
 
-    let result = catch_unwind(AssertUnwindSafe(|| service.wait_termination_timeout(Duration::MAX)));
-
-    assert!(result.is_err());
+    assert!(service.wait_termination_timeout(Duration::MAX));
 }
 
 #[tokio::test]
