@@ -11,11 +11,24 @@ use std::sync::atomic::Ordering;
 use qubit_executor::service::ExecutorServiceLifecycle;
 
 /// Loads a stored executor-service lifecycle value.
+///
+/// # Parameters
+///
+/// * `lifecycle` - Atomic byte containing the service lifecycle encoding.
+///
+/// # Returns
+///
+/// The decoded lifecycle, with unknown values clamped to termination.
+#[inline]
 pub(crate) fn load(lifecycle: &AtomicU8) -> ExecutorServiceLifecycle {
     from_u8(lifecycle.load(Ordering::Acquire))
 }
 
 /// Transitions a running service to graceful shutdown.
+///
+/// # Parameters
+///
+/// * `lifecycle` - Atomic lifecycle value to transition when still running.
 pub(crate) fn shutdown(lifecycle: &AtomicU8) {
     let _ = lifecycle.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
         (from_u8(current) == ExecutorServiceLifecycle::Running).then_some(ExecutorServiceLifecycle::ShuttingDown as u8)
@@ -23,10 +36,24 @@ pub(crate) fn shutdown(lifecycle: &AtomicU8) {
 }
 
 /// Transitions a service to abrupt stop.
+///
+/// # Parameters
+///
+/// * `lifecycle` - Atomic lifecycle value to overwrite with stopping.
 pub(crate) fn stop(lifecycle: &AtomicU8) {
     lifecycle.store(ExecutorServiceLifecycle::Stopping as u8, Ordering::Release);
 }
 
+/// Decodes a lifecycle byte, clamping invalid values to termination.
+///
+/// # Parameters
+///
+/// * `value` - Persisted lifecycle byte.
+///
+/// # Returns
+///
+/// The lifecycle represented by `value`, or terminated for larger values.
+#[inline]
 fn from_u8(value: u8) -> ExecutorServiceLifecycle {
     const STATES: [ExecutorServiceLifecycle; 4] = [
         ExecutorServiceLifecycle::Running,

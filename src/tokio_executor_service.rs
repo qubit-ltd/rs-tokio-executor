@@ -2,6 +2,8 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::future::Future;
 use std::pin::Pin;
@@ -19,6 +21,7 @@ use qubit_executor::task::spi::TaskRunner;
 use qubit_function::Callable;
 use qubit_function::Runnable;
 use tokio::pin;
+use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
 use crate::TokioBlockingTaskHandle;
@@ -31,14 +34,26 @@ use crate::tokio_task_slot_cancellation::take_task_slot;
 
 /// Tokio-backed service for submitted blocking tasks.
 ///
-/// The service accepts fallible [`Runnable`](qubit_function::Runnable) and
-/// [`Callable`] tasks and runs them through Tokio's blocking task pool.
+/// The service accepts fallible [`Runnable`] and [`Callable`] tasks and runs
+/// them through Tokio's blocking task pool.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_executor::service::ExecutorService;
+/// use qubit_tokio_executor::TokioExecutorService;
+///
+/// let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+/// let service = TokioExecutorService::new(runtime.handle().clone());
+/// service.shutdown();
+/// service.wait_termination();
+/// ```
 #[derive(Clone)]
 pub struct TokioExecutorService {
     /// Shared service state used by all clones of this service.
     state: Arc<TokioExecutorServiceState>,
     /// Runtime handle used for all submissions.
-    runtime: tokio::runtime::Handle,
+    runtime: Handle,
 }
 
 /// Tokio-backed blocking executor service routed through `spawn_blocking`.
@@ -51,7 +66,7 @@ impl TokioExecutorService {
     ///
     /// A Tokio-backed executor service.
     #[inline]
-    pub fn new(runtime: tokio::runtime::Handle) -> Self {
+    pub fn new(runtime: Handle) -> Self {
         let state = Arc::new(TokioExecutorServiceState::default());
         Self { state, runtime }
     }

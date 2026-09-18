@@ -87,6 +87,15 @@ impl TokioExecutor {
     /// The executor may be called from another runtime or from a thread that
     /// is not currently entered into Tokio; tasks are always submitted to this
     /// handle's runtime.
+    ///
+    /// # Parameters
+    ///
+    /// * `handle` - Runtime handle that receives blocking task submissions.
+    ///
+    /// # Returns
+    ///
+    /// An executor permanently bound to `handle`'s runtime.
+    #[inline]
     pub fn new(handle: tokio::runtime::Handle) -> Self {
         Self { handle }
     }
