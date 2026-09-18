@@ -1,12 +1,10 @@
-use std::panic::AssertUnwindSafe;
-
 use qubit_executor::SubmissionError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown() {
-    let service = TokioIoExecutorService::default();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let handle = service
         .spawn(async { Ok::<_, &'static str>(5usize) })
         .expect("io service should accept future");
@@ -23,7 +21,7 @@ async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_lifecycle_accessors() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Running);
     assert!(service.is_running());
@@ -40,17 +38,12 @@ async fn test_tokio_io_executor_service_lifecycle_accessors() {
 }
 
 #[test]
-fn test_tokio_io_executor_service_spawn_without_runtime_returns_submission_error() {
-    let service = TokioIoExecutorService::new();
-
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        service.spawn(async { Ok::<usize, std::io::Error>(42) })
-    }))
-    .expect("tokio IO executor service should not panic without a runtime");
-
-    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
-    assert!(service.is_running());
-
+fn test_tokio_io_executor_service_spawn_uses_explicit_runtime_handle() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let service = TokioIoExecutorService::new(runtime.handle().clone());
+    let handle = service
+        .spawn(async { Ok::<usize, std::io::Error>(42) })
+        .expect("submission should succeed");
+    assert_eq!(runtime.block_on(handle).expect("task should succeed"), 42);
     service.shutdown();
-    assert!(service.is_terminated());
 }

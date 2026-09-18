@@ -14,7 +14,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     service.shutdown();
 
     let result = service.spawn(async { Ok::<(), io::Error>(()) });
@@ -26,7 +26,7 @@ async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_shutdown_waits_for_task_handles() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .spawn(async {
@@ -43,7 +43,7 @@ async fn test_tokio_io_executor_service_shutdown_waits_for_task_handles() {
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_await_termination_waits_for_task_completion() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = service
@@ -72,7 +72,7 @@ async fn test_tokio_io_executor_service_await_termination_waits_for_task_complet
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_stop_aborts_running_task_handle() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .spawn(async {
@@ -92,7 +92,7 @@ async fn test_tokio_io_executor_service_stop_aborts_running_task_handle() {
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_stop_ignores_completed_tasks() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     service
         .spawn(async { Ok::<(), io::Error>(()) })
@@ -110,7 +110,7 @@ async fn test_tokio_io_executor_service_stop_ignores_completed_tasks() {
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = service
@@ -135,7 +135,7 @@ async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_tasks() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let (release_tx, release_rx) = tokio::sync::oneshot::channel();
 
     let pending_handle = service

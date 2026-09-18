@@ -5,6 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::time::Duration;
@@ -18,11 +19,13 @@ use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 
 use crate::executor_service_lifecycle_bits;
+use crate::tokio_task_registration::TaskRegistration;
+use crate::tokio_task_registration::key;
 
 /// Abort handle tracked with a service-local task marker.
 struct TrackedAbortHandle {
     /// Marker shared with the lifecycle guard for the same task.
-    marker: Arc<()>,
+    _marker: Arc<TaskRegistration>,
     /// Tokio abort handle used by immediate shutdown.
     handle: AbortHandle,
     /// Completion hook used to publish cancellation for result handles.
@@ -85,7 +88,7 @@ pub(crate) struct TokioExecutorServiceState {
     /// Serializes task submission and shutdown transitions.
     submission_lock: Mutex<()>,
     /// Abort handles for tasks accepted by this service.
-    abort_handles: Mutex<Vec<TrackedAbortHandle>>,
+    abort_handles: Mutex<HashMap<usize, TrackedAbortHandle>>,
     /// Notifies waiters once shutdown has completed and no tasks remain
     /// active.
     pub(crate) terminated_notify: Notify,
@@ -99,12 +102,6 @@ impl TokioExecutorServiceState {
     /// A guard for the submission lock.
     pub(crate) fn lock_submission(&self) -> MutexGuard<'_, ()> {
         self.submission_lock.lock()
-    }
-
-    /// Returns the submission lock used for admission control.
-    #[inline]
-    pub(crate) fn submission_lock(&self) -> &Mutex<()> {
-        &self.submission_lock
     }
 
     /// Records a newly accepted task as queued.
@@ -154,17 +151,21 @@ impl TokioExecutorServiceState {
     /// * `handle` - Tokio abort handle for the accepted task.
     /// * `cancel` - Hook that publishes queued-task cancellation and reports
     ///   whether queued service accounting was actually cancelled.
-    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<()>, handle: AbortHandle, cancel: F)
+    pub(crate) fn register_abort_handle<F>(&self, marker: Arc<TaskRegistration>, handle: AbortHandle, cancel: F)
     where
         F: FnOnce() -> bool + Send + 'static,
     {
         let mut handles = self.lock_abort_handles();
-        if !handle.is_finished() {
-            handles.push(TrackedAbortHandle {
-                marker,
-                handle,
-                cancel: Box::new(cancel),
-            });
+        if !marker.is_finished() && !handle.is_finished() {
+            let previous = handles.insert(
+                key(&marker),
+                TrackedAbortHandle {
+                    _marker: marker,
+                    handle,
+                    cancel: Box::new(cancel),
+                },
+            );
+            debug_assert!(previous.is_none());
         }
     }
 
@@ -173,9 +174,9 @@ impl TokioExecutorServiceState {
     /// # Parameters
     ///
     /// * `marker` - Service-local task marker for the task that finished.
-    pub(crate) fn remove_abort_handle(&self, marker: &Arc<()>) {
-        self.lock_abort_handles()
-            .retain(|tracked| !Arc::ptr_eq(&tracked.marker, marker));
+    pub(crate) fn remove_abort_handle(&self, marker: &Arc<TaskRegistration>) {
+        marker.finish();
+        self.lock_abort_handles().remove(&key(marker));
     }
 
     /// Aborts all currently tracked unfinished tasks.
@@ -185,8 +186,8 @@ impl TokioExecutorServiceState {
     /// Number of queued tasks whose service-side accounting was cancelled.
     pub(crate) fn abort_tracked_tasks(&self) -> usize {
         let mut cancellation_count = 0usize;
-        let mut handles = self.lock_abort_handles();
-        for tracked in handles.drain(..) {
+        let handles = std::mem::take(&mut *self.lock_abort_handles());
+        for (_, tracked) in handles {
             if !tracked.handle.is_finished() {
                 tracked.handle.abort();
                 if (tracked.cancel)() {
@@ -249,7 +250,7 @@ impl TokioExecutorServiceState {
     /// # Returns
     ///
     /// A guard for the tracked Tokio abort handles.
-    fn lock_abort_handles(&self) -> MutexGuard<'_, Vec<TrackedAbortHandle>> {
+    fn lock_abort_handles(&self) -> MutexGuard<'_, HashMap<usize, TrackedAbortHandle>> {
         self.abort_handles.lock()
     }
 

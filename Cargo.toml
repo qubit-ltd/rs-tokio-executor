@@ -35,7 +35,6 @@ doctest = true
 tokio = { version = "^1.53", features = ["rt", "sync"] }
 
 parking_lot = "^0.12"
-qubit-dcl = "0.13"
 qubit-atomic = "0.17"
 qubit-function = "0.18"
 qubit-executor = "0.8"

@@ -130,15 +130,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qubit-dcl"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb0277de88b68d4808c6166024a2dfc3082ad0534f33f9a09bc111bed5bf46b1"
-dependencies = [
- "qubit-lock",
-]
-
-[[package]]
 name = "qubit-executor"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -194,7 +185,6 @@ version = "0.9.0"
 dependencies = [
  "parking_lot",
  "qubit-atomic",
- "qubit-dcl",
  "qubit-executor",
  "qubit-function",
  "qubit-lock",

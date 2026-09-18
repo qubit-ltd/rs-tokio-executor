@@ -21,7 +21,7 @@ fn ok_usize_task() -> Result<usize, io::Error> {
 
 #[tokio::test]
 async fn test_tokio_executor_service_submit_acceptance_is_not_task_success() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
 
     service
         .submit(ok_unit_task as fn() -> Result<(), io::Error>)
@@ -39,7 +39,7 @@ async fn test_tokio_executor_service_submit_acceptance_is_not_task_success() {
 
 #[tokio::test]
 async fn test_tokio_executor_service_submit_callable_returns_value() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .submit_callable(ok_usize_task as fn() -> Result<usize, io::Error>)

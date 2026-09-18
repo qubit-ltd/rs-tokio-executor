@@ -7,7 +7,7 @@ use qubit_tokio_executor::TokioExecutorService;
 
 #[tokio::test]
 async fn test_tokio_executor_service_state_tracks_shutdown_and_active_tasks() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let handle = service

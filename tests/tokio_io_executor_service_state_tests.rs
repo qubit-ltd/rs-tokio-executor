@@ -4,7 +4,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_state_tracks_abort_and_termination() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let handle = service
         .spawn(async {
             tokio::time::sleep(Duration::from_secs(5)).await;

@@ -8,7 +8,6 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use qubit_dcl::DclExecutor;
 use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_executor::service::StopReport;
@@ -17,7 +16,7 @@ use qubit_executor::service::SubmissionError;
 use crate::TokioTaskHandle;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
-use crate::tokio_runtime::ensure_tokio_runtime_entered;
+use crate::tokio_task_registration::TaskRegistration;
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///
@@ -27,16 +26,8 @@ use crate::tokio_runtime::ensure_tokio_runtime_entered;
 pub struct TokioIoExecutorService {
     /// Shared service state used by all clones of this service.
     state: Arc<TokioIoExecutorServiceState>,
-    /// Shared admission gate used for all async submission points.
-    admission_executor: DclExecutor,
-}
-
-impl Default for TokioIoExecutorService {
-    /// Creates a Tokio-backed async task service.
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
+    /// Runtime handle used for all async submissions.
+    runtime: tokio::runtime::Handle,
 }
 
 impl TokioIoExecutorService {
@@ -46,17 +37,12 @@ impl TokioIoExecutorService {
     ///
     /// A Tokio-backed executor service for Future-based tasks.
     #[inline]
-    pub fn new() -> Self {
+    pub fn new(runtime: tokio::runtime::Handle) -> Self {
         let state = Arc::new(TokioIoExecutorServiceState::default());
-        let admission_state = Arc::clone(&state);
-        let admission_executor = DclExecutor::new(move || !admission_state.is_not_running());
-        Self {
-            state,
-            admission_executor,
-        }
+        Self { state, runtime }
     }
 
-    /// Accepts an async task and spawns it on the current Tokio runtime.
+    /// Accepts an async task and spawns it on the bound Tokio runtime.
     ///
     /// # Parameters
     ///
@@ -69,34 +55,27 @@ impl TokioIoExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted. Returns
-    /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
-    /// entered into a Tokio runtime.
+    /// requested before the task is accepted.
     pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
         R: Send + 'static,
         E: Send + 'static,
     {
-        ensure_tokio_runtime_entered()?;
+        let admission = self.state.lock_submission();
+        if self.state.is_not_running() {
+            return Err(SubmissionError::Shutdown);
+        }
+        self.state.active_tasks.inc();
+        let marker = TaskRegistration::new();
+        let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
 
-        let (marker, guard) = self
-            .admission_executor
-            .run(self.state.submission_lock(), || {
-                self.state.active_tasks.inc();
-
-                let marker = Arc::new(());
-                let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
-                Ok((marker, guard))
-            })
-            .into_result()?
-            .ok_or(SubmissionError::Shutdown)?;
-
-        let handle = tokio::spawn(async move {
+        let handle = self.runtime.spawn(async move {
             let _guard = guard;
             future.await.map_err(TaskExecutionError::Failed)
         });
         self.state.register_abort_handle(marker, handle.abort_handle());
+        drop(admission);
         Ok(TokioTaskHandle::new(handle))
     }
 

@@ -8,13 +8,14 @@
 use std::sync::Arc;
 
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
+use crate::tokio_task_registration::TaskRegistration;
 
 /// Task lifecycle guard for [`crate::TokioIoExecutorService`].
 pub(crate) struct TokioIoServiceTaskGuard {
     /// Shared service state updated when the guard is dropped.
     state: Arc<TokioIoExecutorServiceState>,
     /// Service-local marker for removing the tracked abort handle.
-    marker: Arc<()>,
+    marker: Arc<TaskRegistration>,
 }
 
 impl TokioIoServiceTaskGuard {
@@ -29,7 +30,7 @@ impl TokioIoServiceTaskGuard {
     /// # Returns
     ///
     /// A lifecycle guard bound to the supplied service state.
-    pub(crate) fn new(state: Arc<TokioIoExecutorServiceState>, marker: Arc<()>) -> Self {
+    pub(crate) fn new(state: Arc<TokioIoExecutorServiceState>, marker: Arc<TaskRegistration>) -> Self {
         Self { state, marker }
     }
 }

@@ -22,7 +22,7 @@ use qubit_tokio_executor::TokioBlockingExecutorService;
 
 #[tokio::test]
 async fn test_tokio_blocking_task_handle_into_future_returns_result() {
-    let service = TokioBlockingExecutorService::new();
+    let service = TokioBlockingExecutorService::new(tokio::runtime::Handle::current());
     let handle = service
         .submit_tracked_callable(|| Ok::<usize, io::Error>(42))
         .expect("service should accept tracked callable");
