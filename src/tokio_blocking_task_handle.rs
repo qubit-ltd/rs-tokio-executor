@@ -33,6 +33,22 @@ type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 /// Tokio cannot abort blocking work after the closure has started. In that
 /// case [`Self::cancel`] reports [`CancelResult::AlreadyRunning`] through the
 /// underlying tracked task state.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_executor::service::ExecutorService;
+/// use qubit_tokio_executor::TokioExecutorService;
+///
+/// let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+/// let service = TokioExecutorService::new(runtime.handle().clone());
+/// let task = service
+///     .submit_tracked_callable(|| Ok::<_, std::io::Error>(42))
+///     .expect("service should accept the task");
+/// assert_eq!(task.get().expect("task should finish"), 42);
+/// service.shutdown();
+/// service.wait_termination();
+/// ```
 pub struct TokioBlockingTaskHandle<R, E> {
     /// Standard tracked task endpoint used for result and status observation.
     handle: TrackedTask<R, E>,
@@ -118,6 +134,7 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// # Returns
     ///
     /// The current task status.
+    #[must_use]
     #[inline]
     pub fn status(&self) -> TaskStatus {
         self.handle.status()

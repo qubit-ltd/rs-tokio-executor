@@ -22,6 +22,17 @@ use crate::tokio_task_registration::TaskRegistration;
 ///
 /// Accepted futures are spawned with [`tokio::spawn`], so waiting for external
 /// IO does not occupy a dedicated blocking thread.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_tokio_executor::TokioIoExecutorService;
+///
+/// let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+/// let service = TokioIoExecutorService::new(runtime.handle().clone());
+/// service.shutdown();
+/// assert!(service.is_terminated());
+/// ```
 #[derive(Clone)]
 pub struct TokioIoExecutorService {
     /// Shared service state used by all clones of this service.
@@ -94,6 +105,7 @@ impl TokioIoExecutorService {
     ///
     /// A report with zero queued tasks, the observed active-task count, and
     /// the number of Tokio abort handles signalled.
+    #[must_use]
     pub fn stop(&self) -> StopReport {
         let _guard = self.state.lock_submission();
         self.state.stop();
@@ -168,6 +180,9 @@ impl TokioIoExecutorService {
     }
 
     /// Awaits service termination without polling.
+    ///
+    /// The future resolves after shutdown or stop has been requested and every
+    /// accepted task has completed or observed Tokio cancellation.
     pub async fn await_termination(&self) {
         self.state.await_termination().await;
     }

@@ -1,0 +1,4 @@
+# Reviewed structural exceptions for closely coupled private implementation types.
+multiple-public-types | src/tokio_executor_service_state.rs | Private abort records and task counts share the service-state lock protocol.
+multiple-public-types | src/tokio_io_executor_service_state.rs | Private abort records are inseparable from the IO service-state lock protocol.
+multiple-public-types | src/tokio_service_task_guard.rs | Private tracker and public crate-local guard form one lifecycle ownership unit.
