@@ -38,7 +38,7 @@ parking_lot = "^0.12"
 qubit-dcl = "0.13"
 qubit-atomic = "0.17"
 qubit-function = "0.18"
-qubit-executor = { path = "../rs-executor", version = "0.8" }
+qubit-executor = "0.8"
 qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], version = "0.14" }
 
 [dev-dependencies]
