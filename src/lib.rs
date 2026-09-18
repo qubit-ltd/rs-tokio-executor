@@ -17,9 +17,9 @@ mod tokio_executor_service_state;
 mod tokio_io_executor_service;
 mod tokio_io_executor_service_state;
 mod tokio_io_service_task_guard;
-mod tokio_runtime;
 mod tokio_service_task_guard;
 mod tokio_task_handle;
+mod tokio_task_registration;
 mod tokio_task_slot_cancellation;
 
 #[doc(hidden)]

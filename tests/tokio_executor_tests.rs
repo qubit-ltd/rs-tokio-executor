@@ -13,13 +13,12 @@ use std::time::Duration;
 
 use qubit_executor::CancelResult;
 use qubit_executor::Executor;
-use qubit_executor::SubmissionError;
 use qubit_executor::TaskExecutionError;
 use qubit_tokio_executor::TokioExecutor;
 
 #[tokio::test]
 async fn test_tokio_executor_execute_returns_future_result() {
-    let executor = TokioExecutor;
+    let executor = TokioExecutor::new(tokio::runtime::Handle::current());
 
     executor
         .execute(|| Ok::<(), io::Error>(()))
@@ -30,7 +29,7 @@ async fn test_tokio_executor_execute_returns_future_result() {
 
 #[tokio::test]
 async fn test_tokio_executor_call_returns_future_value() {
-    let executor = TokioExecutor;
+    let executor = TokioExecutor::new(tokio::runtime::Handle::current());
 
     let value = executor
         .call(|| Ok::<usize, io::Error>(42))
@@ -42,18 +41,18 @@ async fn test_tokio_executor_call_returns_future_value() {
 }
 
 #[test]
-fn test_tokio_executor_call_without_runtime_returns_submission_error() {
-    let executor = TokioExecutor;
-
-    let result = std::panic::catch_unwind(|| executor.call(|| Ok::<usize, io::Error>(42)))
-        .expect("tokio executor should not panic without a runtime");
-
-    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
+fn test_tokio_executor_call_uses_explicit_runtime_handle() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let executor = TokioExecutor::new(runtime.handle().clone());
+    let result = executor
+        .call(|| Ok::<usize, io::Error>(42))
+        .expect("submission should succeed");
+    assert_eq!(result.get().expect("task should succeed"), 42);
 }
 
 #[tokio::test]
 async fn test_tokio_executor_tracked_task_is_done_reports_completion() {
-    let executor = TokioExecutor;
+    let executor = TokioExecutor::new(tokio::runtime::Handle::current());
 
     let task = executor
         .call(|| {
@@ -85,7 +84,7 @@ fn test_tokio_executor_cancel_queued_blocking_task_reports_cancelled() {
             .recv_timeout(Duration::from_secs(1))
             .expect("blocking slot should be occupied");
 
-        let executor = TokioExecutor;
+        let executor = TokioExecutor::new(tokio::runtime::Handle::current());
         let task = executor
             .call(|| Ok::<(), io::Error>(()))
             .expect("tokio executor should accept callable");
@@ -106,7 +105,7 @@ fn test_tokio_executor_cancel_queued_blocking_task_reports_cancelled() {
 
 #[tokio::test]
 async fn test_tokio_executor_reports_task_panic() {
-    let executor = TokioExecutor;
+    let executor = TokioExecutor::new(tokio::runtime::Handle::current());
 
     let result = executor
         .call(|| -> Result<(), io::Error> { panic!("tokio executor panic") })

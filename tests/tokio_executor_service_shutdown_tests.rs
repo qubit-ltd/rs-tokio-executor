@@ -20,7 +20,7 @@ fn ok_unit_task() -> Result<(), io::Error> {
 
 #[tokio::test]
 async fn test_tokio_executor_service_shutdown_rejects_new_tasks() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     service.shutdown();
 
     let result = service.submit(ok_unit_task as fn() -> Result<(), io::Error>);
@@ -32,7 +32,7 @@ async fn test_tokio_executor_service_shutdown_rejects_new_tasks() {
 
 #[tokio::test]
 async fn test_tokio_executor_service_wait_termination_waits_for_tasks() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .submit_tracked(|| {
@@ -51,7 +51,7 @@ async fn test_tokio_executor_service_wait_termination_waits_for_tasks() {
 
 #[tokio::test]
 async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .submit_tracked(|| {
@@ -70,7 +70,7 @@ async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
 
 #[tokio::test]
 async fn test_tokio_executor_service_wait_termination_timeout_handles_max_duration() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     service.shutdown();
     service.wait_termination();
 
@@ -79,7 +79,7 @@ async fn test_tokio_executor_service_wait_termination_timeout_handles_max_durati
 
 #[tokio::test]
 async fn test_tokio_executor_service_wait_termination_timeout_reports_pending() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let handle = service
         .submit_tracked(|| {
             std::thread::sleep(Duration::from_millis(50));
@@ -95,7 +95,7 @@ async fn test_tokio_executor_service_wait_termination_timeout_reports_pending() 
 
 #[tokio::test]
 async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_task() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
 
@@ -139,7 +139,7 @@ fn test_tokio_executor_service_stop_cancels_queued_detached_task() {
         .expect("tokio runtime should be created");
 
     runtime.block_on(async {
-        let service = TokioExecutorService::new();
+        let service = TokioExecutorService::new(tokio::runtime::Handle::current());
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
@@ -175,7 +175,7 @@ fn test_tokio_executor_service_stop_cancels_queued_tracked_task() {
         .expect("tokio runtime should be created");
 
     runtime.block_on(async {
-        let service = TokioExecutorService::new();
+        let service = TokioExecutorService::new(tokio::runtime::Handle::current());
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
@@ -207,7 +207,7 @@ fn test_tokio_executor_service_stop_cancels_queued_tracked_task() {
 
 #[tokio::test]
 async fn test_tokio_executor_service_stop_ignores_completed_tasks() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
 
     service
         .submit_tracked(ok_unit_task as fn() -> Result<(), io::Error>)
@@ -227,7 +227,7 @@ async fn test_tokio_executor_service_stop_ignores_completed_tasks() {
 
 #[tokio::test]
 async fn test_tokio_executor_service_completion_keeps_waiting_for_remaining_tasks() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
 

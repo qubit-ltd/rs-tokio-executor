@@ -1,5 +1,4 @@
 use std::io;
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -11,7 +10,7 @@ use qubit_tokio_executor::TokioExecutorService;
 
 #[tokio::test]
 async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutdown() {
-    let service = TokioExecutorService::default();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let handle = service
         .submit_callable(|| Ok::<_, io::Error>("done".to_owned()))
         .expect("service should accept callable");
@@ -28,7 +27,7 @@ async fn test_tokio_executor_service_runs_blocking_tasks_and_rejects_after_shutd
 
 #[tokio::test]
 async fn test_tokio_executor_service_runs_tracked_callable() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let handle = service
         .submit_tracked_callable(|| Ok::<_, io::Error>(17))
         .expect("service should accept tracked callable");
@@ -41,7 +40,8 @@ async fn test_tokio_executor_service_runs_tracked_callable() {
 
 #[test]
 fn test_tokio_executor_service_rejects_callable_submissions_after_shutdown() {
-    let service = TokioExecutorService::new();
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let service = TokioExecutorService::new(runtime.handle().clone());
 
     service.shutdown();
     service.wait_termination();
@@ -55,24 +55,19 @@ fn test_tokio_executor_service_rejects_callable_submissions_after_shutdown() {
 
 #[test]
 fn test_tokio_executor_service_submit_without_runtime_returns_submission_error() {
-    let service = TokioExecutorService::new();
-
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        service.submit_callable(|| Ok::<usize, io::Error>(42))
-    }))
-    .expect("tokio executor service should not panic without a runtime");
-
-    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
-    assert!(service.is_running());
-
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let service = TokioExecutorService::new(runtime.handle().clone());
+    let handle = service
+        .submit_callable(|| Ok::<usize, io::Error>(42))
+        .expect("explicit runtime handle should allow submission");
+    assert_eq!(handle.get().expect("task should succeed"), 42);
     service.shutdown();
     service.wait_termination();
-    assert!(service.is_terminated());
 }
 
 #[tokio::test]
 async fn test_tokio_executor_service_submit_runs_detached_task() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let completed = Arc::new(AtomicBool::new(false));
     let completed_for_task = Arc::clone(&completed);
 

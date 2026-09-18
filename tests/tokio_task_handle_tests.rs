@@ -54,7 +54,7 @@ fn test_tokio_task_handle_cancel_aborts_queued_blocking_task() {
             .recv_timeout(Duration::from_secs(1))
             .expect("blocking slot should be occupied");
 
-        let service = TokioExecutorService::new();
+        let service = TokioExecutorService::new(tokio::runtime::Handle::current());
         let ran = Arc::new(AtomicBool::new(false));
         let ran_for_task = Arc::clone(&ran);
         let handle = service
@@ -113,7 +113,7 @@ fn test_tokio_task_handle_cancel_then_stop_does_not_count_cancel_twice() {
             .recv_timeout(Duration::from_secs(1))
             .expect("blocking slot should be occupied");
 
-        let service = TokioExecutorService::new();
+        let service = TokioExecutorService::new(tokio::runtime::Handle::current());
         let handle = service
             .submit_tracked(|| Ok::<(), io::Error>(()))
             .expect("service should accept queued task");
@@ -154,7 +154,7 @@ fn test_tokio_task_handle_cancel_allows_termination_before_queued_closure_runs()
             .recv_timeout(Duration::from_secs(1))
             .expect("blocking slot should be occupied");
 
-        let service = TokioExecutorService::new();
+        let service = TokioExecutorService::new(tokio::runtime::Handle::current());
         let ran = Arc::new(AtomicBool::new(false));
         let ran_for_task = Arc::clone(&ran);
         let (dropped_tx, dropped_rx) = mpsc::channel();
@@ -186,7 +186,7 @@ fn test_tokio_task_handle_cancel_allows_termination_before_queued_closure_runs()
 
 #[tokio::test]
 async fn test_tokio_task_handle_reports_panicked_task() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .submit_tracked(|| -> Result<(), io::Error> { panic!("tokio service panic") })
@@ -199,7 +199,7 @@ async fn test_tokio_task_handle_reports_panicked_task() {
 
 #[tokio::test]
 async fn test_tokio_task_handle_panicked_is_not_cancelled() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .submit_tracked(|| -> Result<(), io::Error> { panic!("tokio service panic") })

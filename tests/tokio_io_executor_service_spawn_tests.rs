@@ -12,7 +12,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_spawn_acceptance_is_not_task_success() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     service
         .spawn(async { Ok::<(), io::Error>(()) })
@@ -32,7 +32,7 @@ async fn test_tokio_io_executor_service_spawn_acceptance_is_not_task_success() {
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_spawn_returns_value() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .spawn(async { Ok::<usize, io::Error>(42) })

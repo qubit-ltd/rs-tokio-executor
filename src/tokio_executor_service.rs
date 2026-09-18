@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use qubit_dcl::DclExecutor;
+use parking_lot::MutexGuard;
 use qubit_executor::TaskHandle;
 use qubit_executor::service::ExecutorService;
 use qubit_executor::service::ExecutorServiceLifecycle;
@@ -20,12 +20,11 @@ use qubit_function::Callable;
 use qubit_function::Runnable;
 use tokio::pin;
 use tokio::task::AbortHandle;
-use tokio::task::spawn_blocking;
 
 use crate::TokioBlockingTaskHandle;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
-use crate::tokio_runtime::ensure_tokio_runtime_entered;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
+use crate::tokio_task_registration::TaskRegistration;
 use crate::tokio_task_slot_cancellation::cancel_unstarted_task_slot_if_queued;
 use crate::tokio_task_slot_cancellation::share_task_slot;
 use crate::tokio_task_slot_cancellation::take_task_slot;
@@ -38,24 +37,12 @@ use crate::tokio_task_slot_cancellation::take_task_slot;
 pub struct TokioExecutorService {
     /// Shared service state used by all clones of this service.
     state: Arc<TokioExecutorServiceState>,
-    /// Shared admission gate used for all submission points.
-    admission_executor: DclExecutor,
+    /// Runtime handle used for all submissions.
+    runtime: tokio::runtime::Handle,
 }
 
 /// Tokio-backed blocking executor service routed through `spawn_blocking`.
 pub type TokioBlockingExecutorService = TokioExecutorService;
-
-impl Default for TokioExecutorService {
-    /// Creates a Tokio-backed executor service.
-    ///
-    /// # Returns
-    ///
-    /// A Tokio-backed executor service.
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl TokioExecutorService {
     /// Creates a new service instance.
@@ -64,17 +51,12 @@ impl TokioExecutorService {
     ///
     /// A Tokio-backed executor service.
     #[inline]
-    pub fn new() -> Self {
+    pub fn new(runtime: tokio::runtime::Handle) -> Self {
         let state = Arc::new(TokioExecutorServiceState::default());
-        let admission_state = Arc::clone(&state);
-        let admission_executor = DclExecutor::new(move || !admission_state.is_not_running());
-        Self {
-            state,
-            admission_executor,
-        }
+        Self { state, runtime }
     }
 
-    /// Prepares a dcl-guarded blocking-task submission context.
+    /// Prepares a blocking-task submission context while holding admission.
     ///
     /// # Returns
     ///
@@ -82,26 +64,26 @@ impl TokioExecutorService {
     ///
     /// # Errors
     ///
-    /// Returns [`SubmissionError::Shutdown`] if the service is not running, or
-    /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
-    /// entered into a Tokio runtime.
-    fn prepare_blocking_submission(&self) -> Result<(Arc<()>, TokioServiceTaskGuard), SubmissionError> {
-        self.admission_executor
-            .run(self.state.submission_lock(), || {
-                self.state.accept_task();
-
-                let marker = Arc::new(());
-                let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
-                Ok((marker, guard))
-            })
-            .into_result()?
-            .ok_or(SubmissionError::Shutdown)
+    /// Returns [`SubmissionError::Shutdown`] if the service is not running.
+    /// Tasks are submitted to the runtime handle captured by [`Self::new`].
+    fn prepare_blocking_submission(
+        &self,
+    ) -> Result<(Arc<TaskRegistration>, TokioServiceTaskGuard, MutexGuard<'_, ()>), SubmissionError> {
+        let admission = self.state.lock_submission();
+        if self.state.is_not_running() {
+            return Err(SubmissionError::Shutdown);
+        }
+        self.state.accept_task();
+        let marker = TaskRegistration::new();
+        let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+        Ok((marker, guard, admission))
     }
 
     /// Spawns a queued blocking task and registers its abort hook.
     fn spawn_accepted_blocking_task<F, C>(
         &self,
-        marker: Arc<()>,
+        marker: Arc<TaskRegistration>,
+        _admission: MutexGuard<'_, ()>,
         guard: TokioServiceTaskGuard,
         task: F,
         cancel: C,
@@ -110,7 +92,7 @@ impl TokioExecutorService {
         F: FnOnce() + Send + 'static,
         C: FnOnce() -> bool + Send + 'static,
     {
-        let join_handle = spawn_blocking(move || {
+        let join_handle = self.runtime.spawn_blocking(move || {
             let guard = guard;
             if !guard.mark_started() {
                 return;
@@ -149,19 +131,17 @@ impl ExecutorService for TokioExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted. Returns
-    /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
-    /// entered into a Tokio runtime.
+    /// requested before the task is accepted.
     fn submit<T, E>(&self, task: T) -> Result<(), SubmissionError>
     where
         T: Runnable<E> + Send + 'static,
         E: Send + 'static,
     {
-        let (marker, guard) = self.prepare_blocking_submission()?;
-        ensure_tokio_runtime_entered()?;
+        let (marker, guard, admission) = self.prepare_blocking_submission()?;
         let abort_queued_task = guard.finish_queued_once_callback();
         self.spawn_accepted_blocking_task(
             marker,
+            admission,
             guard,
             move || {
                 let mut task = task;
@@ -186,17 +166,14 @@ impl ExecutorService for TokioExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted. Returns
-    /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
-    /// entered into a Tokio runtime.
+    /// requested before the task is accepted.
     fn submit_callable<C, R, E>(&self, task: C) -> Result<Self::ResultHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
         E: Send + 'static,
     {
-        let (marker, guard) = self.prepare_blocking_submission()?;
-        ensure_tokio_runtime_entered()?;
+        let (marker, guard, admission) = self.prepare_blocking_submission()?;
         let (handle, completion) = TaskEndpointPair::new().into_parts();
         completion.accept();
         let completion = share_task_slot(completion);
@@ -204,6 +181,7 @@ impl ExecutorService for TokioExecutorService {
         let abort_queued_task = guard.finish_queued_once_callback();
         self.spawn_accepted_blocking_task(
             marker,
+            admission,
             guard,
             move || {
                 if let Some(completion) = take_task_slot(&completion) {
@@ -228,17 +206,14 @@ impl ExecutorService for TokioExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted. Returns
-    /// [`SubmissionError::WorkerSpawnFailed`] if the current thread is not
-    /// entered into a Tokio runtime.
+    /// requested before the task is accepted.
     fn submit_tracked_callable<C, R, E>(&self, task: C) -> Result<Self::TrackedHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
         E: Send + 'static,
     {
-        let (marker, guard) = self.prepare_blocking_submission()?;
-        ensure_tokio_runtime_entered()?;
+        let (marker, guard, admission) = self.prepare_blocking_submission()?;
         let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
         completion.accept();
         let completion = share_task_slot(completion);
@@ -247,6 +222,7 @@ impl ExecutorService for TokioExecutorService {
         let cancel_queued_task = guard.cancel_queued_callback();
         let abort_handle = self.spawn_accepted_blocking_task(
             marker,
+            admission,
             guard,
             move || {
                 if let Some(completion) = take_task_slot(&completion) {

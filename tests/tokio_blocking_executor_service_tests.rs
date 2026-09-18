@@ -22,7 +22,7 @@ use qubit_tokio_executor::TokioBlockingExecutorService;
 
 #[tokio::test]
 async fn test_tokio_blocking_executor_service_alias_runs_blocking_callable() {
-    let service = TokioBlockingExecutorService::new();
+    let service = TokioBlockingExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .submit_callable(|| Ok::<usize, io::Error>(42))
@@ -35,7 +35,7 @@ async fn test_tokio_blocking_executor_service_alias_runs_blocking_callable() {
 
 #[tokio::test]
 async fn test_tokio_blocking_task_handle_get_returns_completed_value() {
-    let service = TokioBlockingExecutorService::new();
+    let service = TokioBlockingExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .submit_tracked_callable(|| Ok::<usize, io::Error>(42))
@@ -48,7 +48,7 @@ async fn test_tokio_blocking_task_handle_get_returns_completed_value() {
 
 #[tokio::test]
 async fn test_tokio_blocking_task_handle_try_get_reports_pending_then_ready() {
-    let service = TokioBlockingExecutorService::new();
+    let service = TokioBlockingExecutorService::new(tokio::runtime::Handle::current());
     let (release_tx, release_rx) = mpsc::channel();
 
     let handle = service
@@ -92,7 +92,7 @@ fn test_tokio_blocking_task_handle_status_and_tracked_trait_cancel() {
         .expect("tokio runtime should be created");
 
     runtime.block_on(async {
-        let service = TokioBlockingExecutorService::new();
+        let service = TokioBlockingExecutorService::new(tokio::runtime::Handle::current());
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {

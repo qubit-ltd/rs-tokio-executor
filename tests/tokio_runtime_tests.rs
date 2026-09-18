@@ -18,12 +18,14 @@
 use std::io;
 
 use qubit_executor::executor::Executor;
-use qubit_executor::service::SubmissionError;
 use qubit_tokio_executor::TokioExecutor;
 
 #[test]
-fn test_tokio_runtime_check_rejects_submission_without_runtime() {
-    let result = TokioExecutor.call(|| Ok::<usize, io::Error>(42));
-
-    assert!(matches!(result, Err(SubmissionError::WorkerSpawnFailed { .. })));
+fn test_tokio_executor_uses_explicit_runtime_handle() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let executor = TokioExecutor::new(runtime.handle().clone());
+    let result = executor
+        .call(|| Ok::<usize, io::Error>(42))
+        .expect("submission should succeed");
+    assert_eq!(result.get().expect("task should succeed"), 42);
 }

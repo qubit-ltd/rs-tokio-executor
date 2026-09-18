@@ -12,8 +12,6 @@ use qubit_executor::task::spi::TaskEndpointPair;
 use qubit_executor::task::spi::TaskRunner;
 use qubit_function::Callable;
 
-use crate::tokio_runtime::ensure_tokio_runtime_entered;
-
 /// Executes callable tasks on Tokio's blocking task pool.
 ///
 /// `TokioExecutor` implements [`Executor`] by submitting work to Tokio's
@@ -22,17 +20,11 @@ use crate::tokio_runtime::ensure_tokio_runtime_entered;
 /// # Semantics
 ///
 /// * **`call` schedules work immediately** — [`Executor::call`] runs
-///   [`tokio::task::spawn_blocking`] **synchronously** before it returns. A
-///   Tokio runtime must **already be active** on the current thread when `call`
-///   runs (for example inside an `async` block executed under
-///   [`Runtime::block_on`](tokio::runtime::Runtime::block_on) or
-///   [`#[tokio::main]`](https://docs.rs/tokio/latest/tokio/attr.main.html)).
-///   Calling `call` first and only then entering a runtime is rejected with
-///   [`SubmissionError::WorkerSpawnFailed`].
-/// * **Any normal Tokio entry point works** — you are **not** restricted to
-///   [`Builder::new_current_thread`](tokio::runtime::Builder::new_current_thread);
-///   a multi-thread [`Runtime`](tokio::runtime::Runtime) or an async handler in
-///   a server is fine, as long as `call` happens while that runtime is running.
+///   [`tokio::task::spawn_blocking`] through the runtime handle captured by
+///   [`Self::new`] before it returns.
+/// * **The caller need not enter the bound runtime** — `call` may be invoked
+///   from another runtime or a plain thread while the bound runtime remains
+///   alive; the task is still submitted to the bound runtime.
 /// * **Await the returned tracked task on Tokio** — the returned
 ///   [`TrackedTask`] implements [`IntoFuture`](std::future::IntoFuture), so it
 ///   can be awaited inside a Tokio-driven async context after submission
@@ -72,7 +64,7 @@ use crate::tokio_runtime::ensure_tokio_runtime_entered;
 ///     .enable_all()
 ///     .build()?
 ///     .block_on(async {
-///         let executor = TokioExecutor;
+///         let executor = TokioExecutor::new(tokio::runtime::Handle::current());
 ///         let value = executor
 ///             .call(|| Ok::<i32, io::Error>(40 + 2))
 ///             .expect("executor should accept callable")
@@ -84,15 +76,27 @@ use crate::tokio_runtime::ensure_tokio_runtime_entered;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Default, Clone, Copy)]
-pub struct TokioExecutor;
+#[derive(Debug, Clone)]
+pub struct TokioExecutor {
+    handle: tokio::runtime::Handle,
+}
+
+impl TokioExecutor {
+    /// Creates an executor bound to the supplied Tokio runtime.
+    ///
+    /// The executor may be called from another runtime or from a thread that
+    /// is not currently entered into Tokio; tasks are always submitted to this
+    /// handle's runtime.
+    pub fn new(handle: tokio::runtime::Handle) -> Self {
+        Self { handle }
+    }
+}
 
 impl Executor for TokioExecutor {
     /// Spawns the callable on Tokio's blocking task pool.
     ///
-    /// This method invokes [`tokio::task::spawn_blocking`] **before**
-    /// returning. A Tokio runtime must be active when this method runs; see
-    /// [`TokioExecutor`].
+    /// This method invokes [`tokio::task::spawn_blocking`] on the runtime
+    /// handle captured by [`Self::new`].
     ///
     /// # Parameters
     ///
@@ -104,20 +108,17 @@ impl Executor for TokioExecutor {
     ///
     /// # Errors
     ///
-    /// Returns [`SubmissionError::WorkerSpawnFailed`] when the current thread
-    /// is not entered into a Tokio runtime.
+    /// The bound runtime handle determines where the task is submitted.
     fn call<C, R, E>(&self, task: C) -> Result<TrackedTask<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
         R: Send + 'static,
         E: Send + 'static,
     {
-        ensure_tokio_runtime_entered().map(|()| {
-            let (handle, slot) = TaskEndpointPair::new().into_tracked_parts();
-            tokio::task::spawn_blocking(move || {
-                TaskRunner::new(task).run(slot);
-            });
-            handle
-        })
+        let (handle, slot) = TaskEndpointPair::new().into_tracked_parts();
+        self.handle.spawn_blocking(move || {
+            TaskRunner::new(task).run(slot);
+        });
+        Ok(handle)
     }
 }

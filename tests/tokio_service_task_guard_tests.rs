@@ -6,7 +6,7 @@ use qubit_tokio_executor::TokioExecutorService;
 
 #[tokio::test]
 async fn test_tokio_service_task_guard_notifies_termination_when_last_task_drops() {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let handle = service
         .submit_tracked(|| {
             std::thread::sleep(Duration::from_millis(10));

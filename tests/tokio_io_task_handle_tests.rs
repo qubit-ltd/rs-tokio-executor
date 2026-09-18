@@ -13,7 +13,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::test]
 async fn test_tokio_io_task_handle_cancel_requests_abort() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .spawn(async {
@@ -32,7 +32,7 @@ async fn test_tokio_io_task_handle_cancel_requests_abort() {
 
 #[tokio::test]
 async fn test_tokio_io_task_handle_cancel_reports_already_finished() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .spawn(async { Ok::<(), io::Error>(()) })
@@ -53,7 +53,7 @@ async fn test_tokio_io_task_handle_cancel_reports_already_finished() {
 
 #[tokio::test]
 async fn test_tokio_io_task_handle_reports_panicked_task() {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
         .spawn(async move {
