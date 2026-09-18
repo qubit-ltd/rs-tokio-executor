@@ -88,10 +88,11 @@ does not remove the already submitted Tokio `spawn_blocking` wrapper from
 Tokio's blocking queue. Use tracked submissions through `TokioExecutorService`
 when queued Tokio blocking work must be aborted directly.
 
-`TokioExecutorService` exposes both blocking `wait_termination` and async
-`await_termination` service-level waiting. `TokioIoExecutorService` intentionally
-does not expose service-level async waiting; await the task handles returned by
-`spawn` when the caller needs to observe async task completion.
+Both `TokioExecutorService` and `TokioIoExecutorService` expose
+`await_termination`; the blocking service also exposes synchronous
+`wait_termination`. Each service is bound to the `tokio::runtime::Handle`
+provided at construction, so submission from another runtime still uses the
+original runtime.
 
 ## Quick Start
 
@@ -104,7 +105,7 @@ use qubit_tokio_executor::{ExecutorService, TokioExecutorService};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let handle = service.submit_callable(|| Ok::<usize, io::Error>(40 + 2))?;
     assert_eq!(handle.await?, 42);
     service.shutdown();
@@ -123,7 +124,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
     assert_eq!(handle.await?, 42);
     service.shutdown();
