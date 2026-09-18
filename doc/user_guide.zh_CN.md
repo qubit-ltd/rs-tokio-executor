@@ -24,6 +24,7 @@
 ```toml
 [dependencies]
 qubit-tokio-executor = "0.9"
+qubit-executor = "0.8"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
@@ -36,7 +37,8 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```rust
 use std::io;
 
-use qubit_tokio_executor::{ExecutorService, TokioExecutorService};
+use qubit_executor::service::ExecutorService;
+use qubit_tokio_executor::TokioExecutorService;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
