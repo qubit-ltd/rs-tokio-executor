@@ -53,7 +53,10 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
 
 `TokioExecutor` 返回标准 `TrackedTask`。取消该 handle 时，如果取消先于任务 start，可以阻止用户 callable 执行，但它不会把已经提交到 Tokio blocking queue 的 `spawn_blocking` wrapper 移除。需要直接 abort queued Tokio blocking work 时，应使用 `TokioExecutorService` 的 tracked 提交。
 
-`TokioExecutorService` 同时提供阻塞式 `wait_termination` 和异步 `await_termination` service-level 等待。`TokioIoExecutorService` 有意不提供 service-level 异步等待；调用方需要观察 async 任务完成时，应 await `spawn` 返回的 task handle。
+`TokioExecutorService` 和 `TokioIoExecutorService` 都提供 `await_termination`，
+阻塞服务另外提供同步 `wait_termination`。每个服务在构造时绑定传入的
+`tokio::runtime::Handle`，即使从另一个 runtime 提交，任务仍会提交到原先绑定的
+runtime。
 
 ## 快速开始
 
@@ -66,7 +69,7 @@ use qubit_tokio_executor::{ExecutorService, TokioExecutorService};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = TokioExecutorService::new();
+    let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let handle = service.submit_callable(|| Ok::<usize, io::Error>(40 + 2))?;
     assert_eq!(handle.await?, 42);
     service.shutdown();
@@ -85,7 +88,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = TokioIoExecutorService::new();
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
     assert_eq!(handle.await?, 42);
     service.shutdown();
