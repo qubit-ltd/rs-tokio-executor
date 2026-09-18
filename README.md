@@ -7,96 +7,29 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![中文文档](https://img.shields.io/badge/文档-中文版-blue.svg)](README.zh_CN.md)
 
-Tokio-backed executor services for Rust.
+Qubit Tokio Executor gives Rust applications already built on Tokio a
+service-oriented way to submit blocking callables and non-blocking futures,
+then observe their results and control their lifecycle through the shared Qubit
+executor abstractions.
 
-## Overview
-
-Qubit Tokio Executor adapts the Qubit executor abstractions to Tokio. It provides
-executor-service semantics for blocking functions submitted through
-`tokio::task::spawn_blocking`, and a separate service for async futures submitted
-through `tokio::spawn`.
-
-The crate does not create or own a Tokio runtime. Calls that spawn Tokio work
-must be made from inside an existing Tokio runtime configured by the
-application.
-
-## Features
-
-- `TokioExecutor` for strategy-level Tokio blocking execution.
-- `TokioExecutorService` for managed blocking work backed by `spawn_blocking`.
-- `TokioBlockingExecutorService` alias for naming the Tokio blocking domain explicitly.
-- `TokioIoExecutorService` for async `Future` work backed by `tokio::spawn`.
-- `TokioBlockingTaskHandle` for tracked blocking tasks with pre-start cancellation.
-- `TokioTaskHandle` for async IO tasks with Tokio abort-based cancellation.
-- Shared `ExecutorService`, `SubmissionError`, `StopReport`, and `CancelResult` re-exports for convenient imports.
-
-## Runtime Requirement
-
-This crate assumes a Tokio runtime already exists. In applications, enable the
-Tokio runtime features you need in `Cargo.toml`:
+## Installation
 
 ```toml
 [dependencies]
 qubit-tokio-executor = "0.9"
-tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
-If a method internally uses `tokio::spawn` or `tokio::task::spawn_blocking`, it
-must be called while a Tokio runtime is entered. Calling it without a runtime is
-rejected with `SubmissionError::WorkerSpawnFailed`.
-
-## Blocking vs IO Tasks
-
-Use `TokioExecutorService` or `TokioBlockingExecutorService` for synchronous
-functions that may block an OS thread. These tasks run through Tokio's blocking
-pool and should not be used for async IO futures.
-
-Use `TokioIoExecutorService` for non-blocking futures. These tasks run on
-Tokio's async scheduler and should not perform long blocking operations inside
-the future body.
-
-## Shutdown and Cancellation
-
-A successful `submit` or `spawn` means only that the service accepted the task.
-Blocking callable submissions report results through the shared `TaskHandle`;
-tracked blocking submissions return `TokioBlockingTaskHandle`, which combines
-the shared tracked-task state with Tokio's abort handle for queued blocking
-tasks. Async IO submissions use `TokioTaskHandle` because they wrap Tokio
-`JoinHandle`s directly.
-
-`shutdown` rejects new tasks and lets accepted tasks finish. `stop`
-rejects new tasks and requests cancellation or abort for tracked Tokio tasks.
-Async IO task cancellation sends a best-effort Tokio abort request;
-`CancelResult::Cancelled` means the request was sent, and the final outcome is
-the result produced by awaiting the returned `TokioTaskHandle`. Blocking tasks
-submitted through Tokio can be cancelled only before their blocking closure
-starts. Queued tracked blocking tasks are removed from service accounting
-immediately after successful cancellation; already running blocking code cannot
-be forcibly stopped by Rust, and service termination waits for that code to
-return.
-
-For `TokioExecutorService`, `StopReport.cancelled` counts blocking tasks that
-were actually cancelled while still queued. Running blocking tasks are reported
-through `StopReport.running` and are not counted as cancelled, even though
-`stop` requests abort for their Tokio handles. For `TokioIoExecutorService`,
-`StopReport.cancelled` counts active async tasks for which a Tokio abort request
-was sent.
-
-`TokioExecutor` returns the standard `TrackedTask`. Cancelling that handle can
-prevent the user callable from running if it wins before the task starts, but it
-does not remove the already submitted Tokio `spawn_blocking` wrapper from
-Tokio's blocking queue. Use tracked submissions through `TokioExecutorService`
-when queued Tokio blocking work must be aborted directly.
-
-Both `TokioExecutorService` and `TokioIoExecutorService` expose
-`await_termination`; the blocking service also exposes synchronous
-`wait_termination`. Each service is bound to the `tokio::runtime::Handle`
-provided at construction, so submission from another runtime still uses the
-original runtime.
+The crate does not create or own a Tokio runtime. Construct a service with the
+application's `tokio::runtime::Handle`, and keep that runtime alive while work
+may run.
 
 ## Quick Start
 
-### Tokio blocking work
+An API service can keep CPU-heavy parsing off Tokio worker threads while it
+continues handling async requests. Submit the parsing closure to
+`TokioExecutorService`, await its shared task handle, then gracefully close the
+service:
 
 ```rust
 use std::io;
@@ -110,78 +43,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(handle.await?, 42);
     service.shutdown();
     service.await_termination().await;
-
     Ok(())
 }
 ```
 
-### Async IO futures
+Use `TokioIoExecutorService::spawn` for non-blocking futures. The [English user
+guide](doc/user_guide.md) and [Chinese user guide](doc/user_guide.zh_CN.md)
+explain both workflows, cancellation, termination, and troubleshooting.
 
-```rust
-use std::io;
+## Why This Project Exists
 
-use qubit_tokio_executor::TokioIoExecutorService;
+Tokio provides scheduling primitives, while Qubit applications may also need a
+common `ExecutorService` lifecycle and task-result model across execution
+domains. This crate adapts those abstractions to Tokio instead of requiring each
+caller to reproduce task admission, shutdown, result handling, and accounting.
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
-    let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
-    assert_eq!(handle.await?, 42);
-    service.shutdown();
-    assert!(service.is_terminated());
+## What It Provides
 
-    Ok(())
-}
-```
+- `TokioExecutor` for strategy-level synchronous callable execution through
+  Tokio's blocking pool.
+- `TokioExecutorService` (and `TokioBlockingExecutorService`) for managed
+  blocking `Runnable` and `Callable` work submitted with `spawn_blocking`.
+- `TokioIoExecutorService` for `Future<Output = Result<R, E>>` work submitted
+  with `tokio::spawn`.
+- `TokioBlockingTaskHandle` for tracked blocking work that can be cancelled
+  before its closure starts, and `TokioTaskHandle` for async results and
+  best-effort abort requests.
 
-## Choosing an Executor
+Choose the blocking service for synchronous work that can occupy an OS thread;
+choose the IO service for non-blocking futures. Do not run long blocking work
+inside an IO future. `shutdown` rejects new tasks and lets accepted work finish;
+`stop` also requests cancellation. Tokio cannot forcibly stop a blocking closure
+after it starts, and an async cancellation request can race with completion.
 
-Use `qubit-tokio-executor` when your application is already Tokio-based and you
-need execution services that integrate with Tokio scheduling. Use
-`qubit-thread-pool` for runtime-independent OS-thread execution, and use
-`qubit-rayon-executor` for CPU-bound Rayon work.
+## Learn More
 
-For application-level wiring across blocking, CPU-bound, Tokio blocking, and
-async IO domains, use `qubit-execution-services`.
+- [User guide (English)](doc/user_guide.md)
+- [用户手册（中文）](doc/user_guide.zh_CN.md)
+- [API documentation](https://docs.rs/qubit-tokio-executor)
+- [中文 README](README.zh_CN.md)
 
 ## Testing
 
-A minimal local run:
-
 ```bash
+# Run tests with the default feature set
 cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+
+# Run tests with all declared features
+cargo test --all-features
+
+# Project CI checks
+./ci-check.sh
+
+# Check code coverage
+./coverage.sh
 ```
-
-To mirror what continuous integration enforces, run the repository scripts from
-the project root: `./align-ci.sh` brings local tooling and configuration in line
-with CI, then `./ci-check.sh` runs the same checks the pipeline uses. For test
-coverage, use `./coverage.sh` to generate or open reports.
-
-## Contributing
-
-Issues and pull requests are welcome.
-
-- Open an issue for bug reports, design questions, or larger feature proposals when it helps align on direction.
-- Keep pull requests scoped to one behavior change, fix, or documentation update when practical.
-- Before submitting, run `./align-ci.sh` and then `./ci-check.sh` so your branch matches CI rules and passes the same checks as the pipeline.
-- Add or update tests when you change runtime behavior, and update this README or public rustdoc when user-visible API behavior changes.
-- If you change runtime, shutdown, or cancellation behavior, cover both blocking and async IO services when applicable.
-
-By contributing, you agree to license your contributions under the [Apache License, Version 2.0](LICENSE), the same license as this project.
 
 ## License
 
-Copyright (c) 2026. Haixing Hu.
+Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-This project is licensed under the [Apache License, Version 2.0](LICENSE). See the `LICENSE` file in the repository for the full text.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the
+full license text.
+
+## Contributing
+
+Contributions are welcome. Please follow the Rust API guidelines, keep public
+API documentation and tests current, and run `./align-ci.sh` to format code and
+`./ci-check.sh` to satisfy CI requirements before submitting a pull request.
 
 ## Author
 
-**Haixing Hu** — Qubit Co. Ltd.
+**Haixing Hu** - *Qubit Co. Ltd.*
 
-| | |
-| --- | --- |
-| **Repository** | [github.com/qubit-ltd/rs-tokio-executor](https://github.com/qubit-ltd/rs-tokio-executor) |
-| **Documentation** | [docs.rs/qubit-tokio-executor](https://docs.rs/qubit-tokio-executor) |
-| **Crate** | [crates.io/crates/qubit-tokio-executor](https://crates.io/crates/qubit-tokio-executor) |
+Repository: [https://github.com/qubit-ltd/rs-tokio-executor](https://github.com/qubit-ltd/rs-tokio-executor)

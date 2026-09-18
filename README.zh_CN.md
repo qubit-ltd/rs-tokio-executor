@@ -5,62 +5,24 @@
 [![Crates.io](https://img.shields.io/crates/v/qubit-tokio-executor.svg?color=blue)](https://crates.io/crates/qubit-tokio-executor)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![English Documentation](https://img.shields.io/badge/docs-English-blue.svg)](README.md)
+[![English Document](https://img.shields.io/badge/Document-English-blue.svg)](README.md)
 
-面向 Rust 的 Tokio-backed executor service。
+Qubit Tokio Executor 为已经采用 Tokio 的 Rust 应用提供统一的执行服务：既能提交可能阻塞的同步任务，也能调度非阻塞 future，并沿用 Qubit 的任务结果和生命周期管理方式。
 
-## 概览
-
-Qubit Tokio Executor 将 Qubit executor 抽象适配到 Tokio。它为通过 `tokio::task::spawn_blocking` 提交的 blocking 函数提供 executor-service 语义，也为通过 `tokio::spawn` 提交的 async future 提供独立服务。
-
-本 crate 不创建也不持有 Tokio runtime。所有会 spawn Tokio 工作的方法，都必须在应用已经配置好的 Tokio runtime 内调用。
-
-## 功能
-
-- 提供 `TokioExecutor`，用于策略级 Tokio blocking 执行。
-- 提供 `TokioExecutorService`，用于基于 `spawn_blocking` 的托管 blocking 工作。
-- 提供 `TokioBlockingExecutorService` 别名，用于明确表达 Tokio blocking 执行域。
-- 提供 `TokioIoExecutorService`，用于基于 `tokio::spawn` 的 async `Future` 工作。
-- 提供 `TokioBlockingTaskHandle`，用于 tracked blocking 任务的开始前取消。
-- 提供 `TokioTaskHandle`，用于 async IO 任务的 Tokio abort-based 取消。
-- 再导出共享的 `ExecutorService`、`SubmissionError`、`StopReport` 与 `CancelResult`，便于使用方导入。
-
-## Runtime 要求
-
-本 crate 假设 Tokio runtime 已经存在。应用需要在 `Cargo.toml` 中启用所需 Tokio runtime feature：
+## 安装
 
 ```toml
 [dependencies]
 qubit-tokio-executor = "0.9"
-tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
-如果某个方法内部使用 `tokio::spawn` 或 `tokio::task::spawn_blocking`，则调用它时必须已经进入 Tokio runtime。没有 runtime 时调用会返回 `SubmissionError::WorkerSpawnFailed`。
-
-## Blocking 与 IO 任务
-
-同步函数可能阻塞 OS 线程时，使用 `TokioExecutorService` 或 `TokioBlockingExecutorService`。这些任务会走 Tokio blocking pool，不应被用来提交 async IO future。
-
-非阻塞 future 使用 `TokioIoExecutorService`。这些任务运行在 Tokio async scheduler 上，不应在 future 内执行长时间 blocking 操作。
-
-## 关闭与取消
-
-`submit` 或 `spawn` 成功只表示服务接受了任务。Blocking callable 提交通过共享的 `TaskHandle` 报告结果；tracked blocking 提交返回 `TokioBlockingTaskHandle`，它把共享 tracked-task 状态与 Tokio abort handle 结合起来，用于处理 queued blocking 任务。Async IO 提交使用 `TokioTaskHandle`，因为它直接包装 Tokio `JoinHandle`。
-
-`shutdown` 拒绝新任务，并允许已接受任务完成。`stop` 拒绝新任务，并请求取消或 abort 已跟踪的 Tokio 任务。Async IO 任务取消会发送 best-effort Tokio abort 请求；`CancelResult::Cancelled` 只表示请求已发出，最终结果以 await 返回的 `TokioTaskHandle` 为准。通过 Tokio 提交的 blocking 任务只能在 blocking 闭包开始前取消。Queued tracked blocking 任务取消成功后会立即从 service 计数中移除；已经运行的 blocking 代码不能被 Rust 强制停止，服务终止会等待这些代码返回。
-
-对于 `TokioExecutorService`，`StopReport.cancelled` 只统计仍处于 queued 状态并实际取消成功的 blocking 任务。已经 running 的 blocking 任务会体现在 `StopReport.running` 中，即使 `stop` 对它们的 Tokio handle 发出了 abort 请求，也不会计入 `cancelled`。对于 `TokioIoExecutorService`，`StopReport.cancelled` 统计发出 Tokio abort 请求的 active async 任务。
-
-`TokioExecutor` 返回标准 `TrackedTask`。取消该 handle 时，如果取消先于任务 start，可以阻止用户 callable 执行，但它不会把已经提交到 Tokio blocking queue 的 `spawn_blocking` wrapper 移除。需要直接 abort queued Tokio blocking work 时，应使用 `TokioExecutorService` 的 tracked 提交。
-
-`TokioExecutorService` 和 `TokioIoExecutorService` 都提供 `await_termination`，
-阻塞服务另外提供同步 `wait_termination`。每个服务在构造时绑定传入的
-`tokio::runtime::Handle`，即使从另一个 runtime 提交，任务仍会提交到原先绑定的
-runtime。
+本 crate 不负责创建或持有 Tokio runtime。请用应用自身的
+`tokio::runtime::Handle` 构造服务，并让 runtime 持续运行到所有已提交任务结束。
 
 ## 快速开始
 
-### Tokio blocking 工作
+例如，Web 服务需要解析一份计算量较大的输入，但又不能占用 Tokio 的工作线程。将解析闭包交给 `TokioExecutorService`，等待共享任务句柄返回结果；应用退出时再停止接收新任务：
 
 ```rust
 use std::io;
@@ -74,71 +36,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(handle.await?, 42);
     service.shutdown();
     service.await_termination().await;
-
     Ok(())
 }
 ```
 
-### Async IO future
+若工作本身就是异步 IO，则使用 `TokioIoExecutorService::spawn`，让 future 继续由 Tokio 异步调度器执行。完整的阻塞任务、异步任务、取消、终止和排障说明，请参阅[英文用户手册](doc/user_guide.md)或[中文用户手册](doc/user_guide.zh_CN.md)。
 
-```rust
-use std::io;
+## 为什么需要这个项目
 
-use qubit_tokio_executor::TokioIoExecutorService;
+Tokio 提供了任务调度原语，但 Qubit 应用往往还需要在多个执行域中复用一致的 `ExecutorService` 生命周期和任务结果模型。这个 crate 将这些抽象适配到 Tokio，避免业务代码反复围绕 Tokio 句柄实现任务准入、关闭、结果传递与计数管理。
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
-    let handle = service.spawn(async { Ok::<usize, io::Error>(6 * 7) })?;
-    assert_eq!(handle.await?, 42);
-    service.shutdown();
-    assert!(service.is_terminated());
+## 核心能力
 
-    Ok(())
-}
-```
+- `TokioExecutor`：通过 Tokio blocking pool 执行同步 callable 的策略级执行器。
+- `TokioExecutorService` 及别名 `TokioBlockingExecutorService`：通过
+  `spawn_blocking` 管理 `Runnable` 和 `Callable` 类型的阻塞任务。
+- `TokioIoExecutorService`：通过 `tokio::spawn` 调度
+  `Future<Output = Result<R, E>>`。
+- `TokioBlockingTaskHandle`：跟踪阻塞任务，并可在闭包开始前请求取消；
+  `TokioTaskHandle`：等待异步任务结果，并支持尽力而为的 abort 请求。
 
-## 如何选择 Executor
+同步任务可能占用 OS 线程时应选择阻塞服务；非阻塞 future 则使用 IO 服务。不要在 IO future 中执行长时间阻塞操作。`shutdown` 会拒绝后续提交并等待已接受任务完成；`stop` 还会请求取消。阻塞闭包一旦开始执行，Tokio 无法强制终止；异步任务的取消请求也可能与正常完成竞争。
 
-如果应用已经基于 Tokio，并且需要与 Tokio 调度集成的执行服务，使用 `qubit-tokio-executor`。需要不绑定 runtime 的 OS 线程执行时，使用 `qubit-thread-pool`。CPU 密集型 Rayon 工作使用 `qubit-rayon-executor`。
+## 延伸阅读
 
-应用层需要统一装配 blocking、CPU、Tokio blocking 与 async IO 域时，使用 `qubit-execution-services`。
+- [用户手册（英文）](doc/user_guide.md)
+- [用户手册（中文）](doc/user_guide.zh_CN.md)
+- [API 文档](https://docs.rs/qubit-tokio-executor)
+- [English README](README.md)
 
 ## 测试
 
-快速在本地跑一遍：
-
 ```bash
+# 使用默认 feature 集运行测试
 cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+
+# 使用项目声明的全部 feature 运行测试
+cargo test --all-features
+
+# 运行项目 CI 检查
+./ci-check.sh
+
+# 检查代码覆盖率
+./coverage.sh
 ```
 
-若要与持续集成（CI）保持一致，请在仓库根目录依次执行：`./align-ci.sh` 将本地工具链与配置对齐到 CI 规则，再执行 `./ci-check.sh` 复现流水线中的检查。需要查看或生成测试覆盖率时，使用 `./coverage.sh`。
+## 许可证
 
-## 参与贡献
+Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-欢迎通过 Issue 与 Pull Request 参与本仓库。建议：
+本项目基于 Apache License 2.0 授权。完整许可证文本请参阅
+[LICENSE](LICENSE)。
 
-- 报告缺陷、讨论设计或较大能力扩展时，可先开 Issue 对齐方向再投入实现。
-- 单次 PR 尽量聚焦单一主题，便于代码审查与合并历史。
-- 提交 PR 前请先运行 `./align-ci.sh`，再运行 `./ci-check.sh`，确保本地与 CI 使用同一套规则且能通过流水线等价检查。
-- 若修改运行期行为，请补充或更新相应测试；若影响对外 API 或用户可见行为，请同步更新本文档或相关 rustdoc。
-- 如果修改 runtime、关闭或取消行为，请在适用时同时覆盖 blocking 服务和 async IO 服务。
+## 贡献
 
-向本仓库贡献内容即表示您同意以 [Apache License, Version 2.0](LICENSE)（与本项目相同）授权您的贡献。
+欢迎贡献。请遵循 Rust API 指南，及时更新公共 API 文档与测试，并在提交
+Pull Request 前运行 `./align-ci.sh`格式化代码，运行`./ci-check.sh`对齐CI要求。
 
-## 许可证与版权
+## 作者
 
-Copyright (c) 2026. Haixing Hu.
+**Haixing Hu** - *Qubit Co. Ltd.*
 
-本软件依据 [Apache License, Version 2.0](LICENSE) 授权；完整许可文本见仓库根目录的 `LICENSE` 文件。
-
-## 作者与维护
-
-**Haixing Hu** — Qubit Co. Ltd.
-
-| | |
-| --- | --- |
-| **源码仓库** | [github.com/qubit-ltd/rs-tokio-executor](https://github.com/qubit-ltd/rs-tokio-executor) |
-| **API 文档** | [docs.rs/qubit-tokio-executor](https://docs.rs/qubit-tokio-executor) |
-| **Crate 发布** | [crates.io/crates/qubit-tokio-executor](https://crates.io/crates/qubit-tokio-executor) |
+仓库地址：[https://github.com/qubit-ltd/rs-tokio-executor](https://github.com/qubit-ltd/rs-tokio-executor)
