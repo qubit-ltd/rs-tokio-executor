@@ -13,7 +13,7 @@ Qubit Tokio Executor 为已经采用 Tokio 的 Rust 应用提供统一的执行�
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.9"
+qubit-tokio-executor = "0.10"
 qubit-executor = "0.8"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```

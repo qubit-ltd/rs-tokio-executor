@@ -7,6 +7,7 @@
 // =============================================================================
 // qubit-style: allow multiple-public-types
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::time::Duration;
@@ -18,6 +19,9 @@ use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::ParkingLotMonitor;
 use tokio::sync::Notify;
 use tokio::task::AbortHandle;
+
+/// Maximum number of accepted unfinished blocking tasks by default.
+const DEFAULT_TASK_CAPACITY: usize = 1024;
 
 use crate::executor_service_lifecycle_bits;
 use crate::tokio_task_registration::TaskRegistration;
@@ -80,12 +84,13 @@ impl TokioExecutorTaskCounts {
 }
 
 /// Shared state for [`crate::TokioExecutorService`].
-#[derive(Default)]
 pub(crate) struct TokioExecutorServiceState {
     /// Stored lifecycle state before derived termination.
     lifecycle: AtomicU8,
     /// Accepted blocking task counts and synchronous termination monitor.
     task_counts: ParkingLotMonitor<TokioExecutorTaskCounts>,
+    /// Maximum number of accepted blocking tasks that have not finished.
+    task_capacity: NonZeroUsize,
     /// Serializes task submission and shutdown transitions.
     submission_lock: Mutex<()>,
     /// Abort handles for tasks accepted by this service.
@@ -95,7 +100,36 @@ pub(crate) struct TokioExecutorServiceState {
     pub(crate) terminated_notify: Notify,
 }
 
+impl Default for TokioExecutorServiceState {
+    /// Creates service state with the default task capacity.
+    fn default() -> Self {
+        Self::with_task_capacity(
+            NonZeroUsize::new(DEFAULT_TASK_CAPACITY).expect("default task capacity should be nonzero"),
+        )
+    }
+}
+
 impl TokioExecutorServiceState {
+    /// Creates state with an explicit accepted-task capacity.
+    ///
+    /// # Parameters
+    ///
+    /// * `task_capacity` - Maximum queued and running tasks accepted at once.
+    ///
+    /// # Returns
+    ///
+    /// Shared service state configured with the supplied nonzero capacity.
+    pub(crate) fn with_task_capacity(task_capacity: NonZeroUsize) -> Self {
+        Self {
+            lifecycle: AtomicU8::default(),
+            task_counts: ParkingLotMonitor::new(TokioExecutorTaskCounts::default()),
+            task_capacity,
+            submission_lock: Mutex::new(()),
+            abort_handles: Mutex::new(HashMap::new()),
+            terminated_notify: Notify::new(),
+        }
+    }
+
     /// Acquires the submission lock while tolerating poisoned locks.
     ///
     /// # Returns
@@ -105,9 +139,23 @@ impl TokioExecutorServiceState {
         self.submission_lock.lock()
     }
 
-    /// Records a newly accepted task as queued.
-    pub(crate) fn accept_task(&self) {
-        self.task_counts.with_write(TokioExecutorTaskCounts::accept_task);
+    /// Reserves a capacity slot and records a newly accepted task as queued.
+    ///
+    /// The caller must hold the submission lock so capacity cannot be reserved
+    /// concurrently with shutdown admission.
+    ///
+    /// # Returns
+    ///
+    /// `true` if capacity was reserved; `false` if the unfinished-task limit
+    /// has been reached.
+    pub(crate) fn try_accept_task(&self) -> bool {
+        self.task_counts.with_write(|counts| {
+            if counts.queued.saturating_add(counts.running) >= self.task_capacity.get() {
+                return false;
+            }
+            counts.accept_task();
+            true
+        })
     }
 
     /// Moves a task from queued to running.

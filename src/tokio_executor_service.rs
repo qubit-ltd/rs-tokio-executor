@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -56,6 +57,9 @@ pub struct TokioExecutorService {
     runtime: Handle,
 }
 
+/// Maximum number of accepted unfinished blocking tasks by default.
+const DEFAULT_TASK_CAPACITY: usize = 1024;
+
 /// Tokio-backed blocking executor service routed through `spawn_blocking`.
 pub type TokioBlockingExecutorService = TokioExecutorService;
 
@@ -67,7 +71,28 @@ impl TokioExecutorService {
     /// A Tokio-backed executor service.
     #[inline]
     pub fn new(runtime: Handle) -> Self {
-        let state = Arc::new(TokioExecutorServiceState::default());
+        Self::with_task_capacity(
+            runtime,
+            NonZeroUsize::new(DEFAULT_TASK_CAPACITY).expect("default task capacity should be nonzero"),
+        )
+    }
+
+    /// Creates a service with a maximum number of accepted unfinished tasks.
+    ///
+    /// The capacity counts both queued and running `spawn_blocking` tasks.
+    /// Cancelling a queued task or finishing a running task releases one slot;
+    /// Tokio cannot cancel a blocking closure after it has started.
+    ///
+    /// # Parameters
+    ///
+    /// * `runtime` - Tokio runtime used to execute accepted blocking tasks.
+    /// * `task_capacity` - Nonzero limit for accepted unfinished tasks.
+    ///
+    /// # Returns
+    ///
+    /// A Tokio-backed service configured with the supplied capacity.
+    pub fn with_task_capacity(runtime: Handle, task_capacity: NonZeroUsize) -> Self {
+        let state = Arc::new(TokioExecutorServiceState::with_task_capacity(task_capacity));
         Self { state, runtime }
     }
 
@@ -79,7 +104,8 @@ impl TokioExecutorService {
     ///
     /// # Errors
     ///
-    /// Returns [`SubmissionError::Shutdown`] if the service is not running.
+    /// Returns [`SubmissionError::Shutdown`] if the service is not running, or
+    /// [`SubmissionError::Saturated`] if its unfinished-task capacity is full.
     /// Tasks are submitted to the runtime handle captured by [`Self::new`].
     fn prepare_blocking_submission(
         &self,
@@ -88,7 +114,9 @@ impl TokioExecutorService {
         if self.state.is_not_running() {
             return Err(SubmissionError::Shutdown);
         }
-        self.state.accept_task();
+        if !self.state.try_accept_task() {
+            return Err(SubmissionError::Saturated);
+        }
         let marker = TaskRegistration::new();
         let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
         Ok((marker, guard, admission))
