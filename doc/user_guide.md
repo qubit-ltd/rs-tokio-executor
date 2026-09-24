@@ -2,7 +2,7 @@
 
 [中文](user_guide.zh_CN.md) | [README](../README.md) | [API documentation](https://docs.rs/qubit-tokio-executor)
 
-Applies to `qubit-tokio-executor` 0.9. This guide is for Rust application
+Applies to `qubit-tokio-executor` 0.10. This guide is for Rust application
 authors who already run Tokio and want Qubit's task-result and service-lifecycle
 abstractions for blocking callables or asynchronous futures.
 
@@ -34,7 +34,7 @@ occupy an OS thread.
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.9"
+qubit-tokio-executor = "0.10"
 qubit-executor = "0.8"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
@@ -94,6 +94,16 @@ Use `submit_tracked_callable` when queued blocking work must be individually
 cancelled. `TokioBlockingTaskHandle::cancel` can cancel only before the blocking
 closure starts. `TokioTaskHandle::cancel` sends Tokio an abort request; await
 the handle to observe whether cancellation or completion won the race.
+
+Each service accepts at most 1024 unfinished tasks by default. The blocking
+service counts queued and running tasks; the IO service also counts accepted
+futures that Tokio has not polled yet. At capacity, submission returns
+`SubmissionError::Saturated`. Use `TokioExecutorService::with_task_capacity` or
+`TokioIoExecutorService::with_task_capacity` with a `NonZeroUsize` to choose a
+different finite limit. Completion and cancellation release capacity when the
+underlying task is dropped. A blocking closure that has started keeps its slot
+until it returns. Shutdown is checked before capacity, so submissions after
+shutdown return `SubmissionError::Shutdown` even while all slots are occupied.
 
 ## Errors and Diagnostics
 

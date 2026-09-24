@@ -2,7 +2,7 @@
 
 [English](user_guide.md) | [README](../README.zh_CN.md) | [API 文档](https://docs.rs/qubit-tokio-executor)
 
-本文适用于 `qubit-tokio-executor` 0.9，面向已经运行 Tokio 的 Rust 应用开发者。它说明如何在处理可能阻塞的同步任务或异步 future 时，复用 Qubit 的任务结果与服务生命周期抽象。
+本文适用于 `qubit-tokio-executor` 0.10，面向已经运行 Tokio 的 Rust 应用开发者。它说明如何在处理可能阻塞的同步任务或异步 future 时，复用 Qubit 的任务结果与服务生命周期抽象。
 
 ## 概念模型
 
@@ -23,7 +23,7 @@
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.9"
+qubit-tokio-executor = "0.10"
 qubit-executor = "0.8"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
@@ -74,6 +74,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 需要单独取消排队中的阻塞任务时，使用 `submit_tracked_callable`。`TokioBlockingTaskHandle::cancel` 只有在阻塞闭包尚未开始时才能取消任务。异步任务的 `TokioTaskHandle::cancel` 会向 Tokio 发出 abort 请求；完成与取消可能竞争，最终仍应等待句柄确认结果。
+
+两个服务默认各自最多接收 1024 个尚未完成的任务。阻塞服务统计排队和
+运行中的任务；IO 服务还统计 Tokio 已接收但尚未 poll 的 future。达到容量
+后提交返回 `SubmissionError::Saturated`。可使用
+`TokioExecutorService::with_task_capacity` 或
+`TokioIoExecutorService::with_task_capacity` 并传入 `NonZeroUsize` 设置其他
+有限容量。任务完成或底层任务取消并释放后会归还容量；已经开始运行的阻塞
+闭包会一直占用容量直到返回。服务先检查关闭状态，再检查容量；即使容量已满，
+关闭后的提交也返回 `SubmissionError::Shutdown`。
 
 ## 错误与诊断
 

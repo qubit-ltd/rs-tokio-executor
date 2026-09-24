@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use qubit_executor::TaskExecutionError;
@@ -41,6 +42,9 @@ pub struct TokioIoExecutorService {
     runtime: tokio::runtime::Handle,
 }
 
+/// Maximum number of accepted unfinished async tasks by default.
+const DEFAULT_TASK_CAPACITY: usize = 1024;
+
 impl TokioIoExecutorService {
     /// Creates a new service instance.
     ///
@@ -49,7 +53,28 @@ impl TokioIoExecutorService {
     /// A Tokio-backed executor service for Future-based tasks.
     #[inline]
     pub fn new(runtime: tokio::runtime::Handle) -> Self {
-        let state = Arc::new(TokioIoExecutorServiceState::default());
+        Self::with_task_capacity(
+            runtime,
+            NonZeroUsize::new(DEFAULT_TASK_CAPACITY).expect("default task capacity should be nonzero"),
+        )
+    }
+
+    /// Creates a service with a maximum number of accepted unfinished futures.
+    ///
+    /// A slot remains occupied until the future completes or Tokio observes an
+    /// abort. Cancelling a future before its first poll also releases the slot
+    /// when Tokio drops the task.
+    ///
+    /// # Parameters
+    ///
+    /// * `runtime` - Tokio runtime used to execute accepted futures.
+    /// * `task_capacity` - Nonzero limit for accepted unfinished futures.
+    ///
+    /// # Returns
+    ///
+    /// A Tokio-backed service configured with the supplied capacity.
+    pub fn with_task_capacity(runtime: tokio::runtime::Handle, task_capacity: NonZeroUsize) -> Self {
+        let state = Arc::new(TokioIoExecutorServiceState::with_task_capacity(task_capacity));
         Self { state, runtime }
     }
 
@@ -66,7 +91,8 @@ impl TokioIoExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted.
+    /// requested, or [`SubmissionError::Saturated`] if the unfinished-task
+    /// capacity is full.
     pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
@@ -77,7 +103,9 @@ impl TokioIoExecutorService {
         if self.state.is_not_running() {
             return Err(SubmissionError::Shutdown);
         }
-        self.state.active_tasks.inc();
+        if !self.state.try_accept_task() {
+            return Err(SubmissionError::Saturated);
+        }
         let marker = TaskRegistration::new();
         let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
 
