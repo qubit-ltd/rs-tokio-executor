@@ -40,6 +40,7 @@ impl Drop for TokioIoServiceTaskGuard {
     fn drop(&mut self) {
         self.state.remove_abort_handle(&self.marker);
         self.state.active_tasks.dec();
+        self.state.notify_capacity_changed();
         self.state.notify_termination_waiters();
     }
 }

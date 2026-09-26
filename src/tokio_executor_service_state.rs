@@ -18,11 +18,13 @@ use parking_lot::MutexGuard;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_lock::ParkingLotMonitor;
 use tokio::sync::Notify;
+use tokio::sync::watch;
 use tokio::task::AbortHandle;
 
 /// Maximum number of accepted unfinished blocking tasks by default.
 const DEFAULT_TASK_CAPACITY: usize = 1024;
 
+use crate::TokioExecutorServiceStats;
 use crate::executor_service_lifecycle_bits;
 use crate::tokio_task_registration::TaskRegistration;
 use crate::tokio_task_registration::key;
@@ -98,6 +100,8 @@ pub(crate) struct TokioExecutorServiceState {
     /// Notifies waiters once shutdown has completed and no tasks remain
     /// active.
     pub(crate) terminated_notify: Notify,
+    /// Generation counter notifying asynchronous capacity waiters.
+    capacity_tx: watch::Sender<u64>,
 }
 
 impl Default for TokioExecutorServiceState {
@@ -127,6 +131,7 @@ impl TokioExecutorServiceState {
             submission_lock: Mutex::new(()),
             abort_handles: Mutex::new(HashMap::new()),
             terminated_notify: Notify::new(),
+            capacity_tx: watch::channel(0).0,
         }
     }
 
@@ -137,6 +142,38 @@ impl TokioExecutorServiceState {
     /// A guard for the submission lock.
     pub(crate) fn lock_submission(&self) -> MutexGuard<'_, ()> {
         self.submission_lock.lock()
+    }
+
+    /// Subscribes to task-capacity or lifecycle changes.
+    ///
+    /// # Returns
+    ///
+    /// A receiver that provides hints; callers must retry admission after each
+    /// notification.
+    pub(crate) fn capacity_changes(&self) -> watch::Receiver<u64> {
+        self.capacity_tx.subscribe()
+    }
+
+    /// Returns a best-effort snapshot of queue, worker, and lifecycle state.
+    ///
+    /// # Returns
+    ///
+    /// The configured capacity and task counts. Lifecycle may be sampled at an
+    /// adjacent instant to the counts.
+    pub(crate) fn stats(&self) -> TokioExecutorServiceStats {
+        let (queued, running) = self.task_count_snapshot();
+        TokioExecutorServiceStats {
+            lifecycle: self.lifecycle(),
+            task_capacity: self.task_capacity.get(),
+            queued,
+            running,
+        }
+    }
+
+    /// Publishes a task-capacity or lifecycle change.
+    fn notify_capacity_changed(&self) {
+        self.capacity_tx
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
     }
 
     /// Reserves a capacity slot and records a newly accepted task as queued.
@@ -173,6 +210,7 @@ impl TokioExecutorServiceState {
             counts.finish_task(started);
             self.is_not_running() && counts.is_empty()
         });
+        self.notify_capacity_changed();
         if terminated {
             self.notify_termination_waiters();
         }
@@ -322,10 +360,12 @@ impl TokioExecutorServiceState {
     /// Marks the service as shutting down.
     pub(crate) fn shutdown(&self) {
         executor_service_lifecycle_bits::shutdown(&self.lifecycle);
+        self.notify_capacity_changed();
     }
 
     /// Marks the service as stopping.
     pub(crate) fn stop(&self) {
         executor_service_lifecycle_bits::stop(&self.lifecycle);
+        self.notify_capacity_changed();
     }
 }

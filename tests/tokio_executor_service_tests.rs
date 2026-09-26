@@ -96,3 +96,40 @@ async fn test_tokio_executor_service_submit_runs_detached_task() {
     let rejected = service.submit(|| Ok::<(), std::io::Error>(()));
     assert!(matches!(rejected, Err(SubmissionError::Shutdown)));
 }
+
+#[tokio::test]
+async fn test_tokio_executor_service_stats_and_capacity_changes() {
+    let capacity = std::num::NonZeroUsize::new(2).expect("capacity is nonzero");
+    let service = TokioExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let running = service
+        .submit_tracked_callable(move || {
+            started_tx.send(()).expect("test should observe task start");
+            release_rx.recv().expect("test should release task");
+            Ok::<(), io::Error>(())
+        })
+        .expect("first task should be accepted");
+    started_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("blocking task should start");
+    let queued = service
+        .submit_tracked_callable(|| Ok::<(), io::Error>(()))
+        .expect("second task should be accepted");
+    let mut changes = service.capacity_changes();
+
+    let stats = service.stats();
+    assert_eq!(stats.task_capacity, 2);
+    assert_eq!(stats.queued, 1);
+    assert_eq!(stats.running, 1);
+
+    release_tx.send(()).expect("running task should be released");
+    tokio::time::timeout(std::time::Duration::from_secs(1), changes.changed())
+        .await
+        .expect("task completion should publish capacity change")
+        .expect("capacity notification sender should remain open");
+    running.await.expect("running task should finish");
+    queued.await.expect("queued task should finish");
+    service.shutdown();
+    service.await_termination().await;
+}

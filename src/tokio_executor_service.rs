@@ -26,6 +26,7 @@ use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
 use crate::TokioBlockingTaskHandle;
+use crate::TokioExecutorServiceStats;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
 use crate::tokio_task_registration::TaskRegistration;
@@ -64,6 +65,30 @@ const DEFAULT_TASK_CAPACITY: usize = 1024;
 pub type TokioBlockingExecutorService = TokioExecutorService;
 
 impl TokioExecutorService {
+    /// Returns a best-effort snapshot of current task counts and lifecycle.
+    ///
+    /// # Returns
+    ///
+    /// The configured task capacity, queued and running counts, and lifecycle.
+    #[must_use]
+    #[inline]
+    pub fn stats(&self) -> TokioExecutorServiceStats {
+        self.state.stats()
+    }
+
+    /// Subscribes to changes that may make another blocking task admissible.
+    ///
+    /// A notification is only a hint; callers must retry submission because
+    /// another producer may consume the available capacity first.
+    ///
+    /// # Returns
+    ///
+    /// A receiver that observes capacity and lifecycle changes.
+    #[must_use]
+    pub fn capacity_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.state.capacity_changes()
+    }
+
     /// Creates a new service instance.
     ///
     /// # Returns
