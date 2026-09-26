@@ -17,11 +17,13 @@ use qubit_atomic::AtomicCount;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use tokio::pin;
 use tokio::sync::Notify;
+use tokio::sync::watch;
 use tokio::task::AbortHandle;
 
 /// Maximum number of accepted unfinished async tasks by default.
 const DEFAULT_TASK_CAPACITY: usize = 1024;
 
+use crate::TokioIoExecutorServiceStats;
 use crate::executor_service_lifecycle_bits;
 use crate::tokio_task_registration::TaskRegistration;
 use crate::tokio_task_registration::key;
@@ -48,6 +50,8 @@ pub(crate) struct TokioIoExecutorServiceState {
     abort_handles: Mutex<HashMap<usize, TrackedAbortHandle>>,
     /// Wakes async termination waiters after lifecycle-affecting changes.
     termination_notify: Notify,
+    /// Generation counter notifying asynchronous capacity waiters.
+    capacity_tx: watch::Sender<u64>,
 }
 
 impl Default for TokioIoExecutorServiceState {
@@ -77,6 +81,7 @@ impl TokioIoExecutorServiceState {
             submission_lock: Mutex::new(()),
             abort_handles: Mutex::new(HashMap::new()),
             termination_notify: Notify::new(),
+            capacity_tx: watch::channel(0).0,
         }
     }
 
@@ -87,6 +92,36 @@ impl TokioIoExecutorServiceState {
     /// A guard for the submission lock.
     pub(crate) fn lock_submission(&self) -> MutexGuard<'_, ()> {
         self.submission_lock.lock()
+    }
+
+    /// Subscribes to task-capacity or lifecycle changes.
+    ///
+    /// # Returns
+    ///
+    /// A receiver that provides hints; callers must retry admission after each
+    /// notification.
+    pub(crate) fn capacity_changes(&self) -> watch::Receiver<u64> {
+        self.capacity_tx.subscribe()
+    }
+
+    /// Returns a snapshot of accepted unfinished futures.
+    ///
+    /// # Returns
+    ///
+    /// The configured capacity, accepted unfinished count, and lifecycle. The
+    /// counts are independently sampled.
+    pub(crate) fn stats(&self) -> TokioIoExecutorServiceStats {
+        TokioIoExecutorServiceStats {
+            lifecycle: self.lifecycle(),
+            task_capacity: self.task_capacity.get(),
+            accepted_unfinished: self.active_tasks.get(),
+        }
+    }
+
+    /// Publishes a task-capacity or lifecycle change.
+    pub(crate) fn notify_capacity_changed(&self) {
+        self.capacity_tx
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
     }
 
     /// Reserves a capacity slot for one accepted future.
@@ -184,12 +219,14 @@ impl TokioIoExecutorServiceState {
     /// Marks the service as shutting down.
     pub(crate) fn shutdown(&self) {
         executor_service_lifecycle_bits::shutdown(&self.lifecycle);
+        self.notify_capacity_changed();
         self.termination_notify.notify_waiters();
     }
 
     /// Marks the service as stopping.
     pub(crate) fn stop(&self) {
         executor_service_lifecycle_bits::stop(&self.lifecycle);
+        self.notify_capacity_changed();
         self.termination_notify.notify_waiters();
     }
 

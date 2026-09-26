@@ -14,6 +14,7 @@ use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_executor::service::StopReport;
 use qubit_executor::service::SubmissionError;
 
+use crate::TokioIoExecutorServiceStats;
 use crate::TokioTaskHandle;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
@@ -46,6 +47,31 @@ pub struct TokioIoExecutorService {
 const DEFAULT_TASK_CAPACITY: usize = 1024;
 
 impl TokioIoExecutorService {
+    /// Returns a best-effort snapshot of accepted unfinished futures.
+    ///
+    /// # Returns
+    ///
+    /// The configured capacity, accepted unfinished count, and lifecycle.
+    /// The count includes futures not yet polled by Tokio.
+    #[must_use]
+    #[inline]
+    pub fn stats(&self) -> TokioIoExecutorServiceStats {
+        self.state.stats()
+    }
+
+    /// Subscribes to changes that may make another future admissible.
+    ///
+    /// A notification is only a hint; callers must retry submission because
+    /// another producer may consume the available capacity first.
+    ///
+    /// # Returns
+    ///
+    /// A receiver that observes capacity and lifecycle changes.
+    #[must_use]
+    pub fn capacity_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.state.capacity_changes()
+    }
+
     /// Creates a new service instance.
     ///
     /// # Returns

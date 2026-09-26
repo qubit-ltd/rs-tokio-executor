@@ -54,3 +54,37 @@ fn test_tokio_io_executor_service_spawn_uses_explicit_runtime_handle() {
     assert_eq!(runtime.block_on(handle).expect("task should succeed"), 42);
     service.shutdown();
 }
+
+#[tokio::test]
+async fn test_tokio_io_executor_service_stats_and_capacity_changes() {
+    let capacity = std::num::NonZeroUsize::new(1).expect("capacity is nonzero");
+    let service = TokioIoExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
+    let handle = service
+        .spawn(async {
+            std::future::pending::<()>().await;
+            Ok::<(), std::io::Error>(())
+        })
+        .expect("one pending future should be accepted");
+    let mut changes = service.capacity_changes();
+
+    let stats = service.stats();
+    assert_eq!(stats.task_capacity, 1);
+    assert_eq!(stats.accepted_unfinished, 1);
+    assert!(matches!(
+        service.spawn(async { Ok::<(), std::io::Error>(()) }),
+        Err(SubmissionError::Saturated)
+    ));
+
+    let report = service.stop();
+    assert_eq!(report.cancelled, 1);
+    tokio::time::timeout(std::time::Duration::from_secs(1), changes.changed())
+        .await
+        .expect("stop should publish a capacity change")
+        .expect("capacity notification sender should remain open");
+    assert!(matches!(
+        handle.await,
+        Err(qubit_executor::TaskExecutionError::Cancelled)
+    ));
+    service.await_termination().await;
+    assert_eq!(service.stats().accepted_unfinished, 0);
+}
