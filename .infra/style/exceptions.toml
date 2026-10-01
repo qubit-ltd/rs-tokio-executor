@@ -1,1 +1,16 @@
 format = 1
+
+[[exceptions]]
+rule = "public-type-layout"
+path = "src/tokio_executor_service_state.rs"
+reason = "Private abort records and task counts share the service-state lock protocol."
+
+[[exceptions]]
+rule = "public-type-layout"
+path = "src/tokio_io_executor_service_state.rs"
+reason = "Private abort records are inseparable from the IO service-state lock protocol."
+
+[[exceptions]]
+rule = "public-type-layout"
+path = "src/tokio_service_task_guard.rs"
+reason = "Private tracker and public crate-local guard form one lifecycle ownership unit."
