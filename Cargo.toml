@@ -42,3 +42,5 @@ qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], 
 
 [dev-dependencies]
 tokio = { version = "^1.53", features = ["macros", "rt-multi-thread", "time"] }
+
+[workspace]
