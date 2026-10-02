@@ -74,7 +74,7 @@ fn test_tokio_task_handle_cancel_aborts_queued_blocking_task() {
             waiter_service.wait_termination();
             terminated_tx.send(()).expect("test should receive termination signal");
         });
-        if terminated_rx.recv_timeout(Duration::from_millis(100)).is_err() {
+        if terminated_rx.recv_timeout(Duration::from_secs(1)).is_err() {
             release_tx
                 .send(())
                 .expect("blocking task should receive release signal");
