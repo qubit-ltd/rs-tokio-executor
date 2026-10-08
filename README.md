@@ -16,8 +16,8 @@ executor abstractions.
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.10"
-qubit-executor = "0.8"
+qubit-tokio-executor = "0.11"
+qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
 

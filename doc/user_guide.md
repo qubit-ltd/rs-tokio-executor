@@ -2,7 +2,7 @@
 
 [中文](user_guide.zh_CN.md) | [README](../README.md) | [API documentation](https://docs.rs/qubit-tokio-executor)
 
-Applies to `qubit-tokio-executor` 0.10. This guide is for Rust application
+Applies to `qubit-tokio-executor` 0.11. This guide is for Rust application
 authors who already run Tokio and want Qubit's task-result and service-lifecycle
 abstractions for blocking callables or asynchronous futures.
 
@@ -34,8 +34,8 @@ occupy an OS thread.
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.10"
-qubit-executor = "0.8"
+qubit-tokio-executor = "0.11"
+qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
 

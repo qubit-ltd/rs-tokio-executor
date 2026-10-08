@@ -2,7 +2,7 @@
 
 [English](user_guide.md) | [README](../README.zh_CN.md) | [API 文档](https://docs.rs/qubit-tokio-executor)
 
-本文适用于 `qubit-tokio-executor` 0.10，面向已经运行 Tokio 的 Rust 应用开发者。它说明如何在处理可能阻塞的同步任务或异步 future 时，复用 Qubit 的任务结果与服务生命周期抽象。
+本文适用于 `qubit-tokio-executor` 0.11，面向已经运行 Tokio 的 Rust 应用开发者。它说明如何在处理可能阻塞的同步任务或异步 future 时，复用 Qubit 的任务结果与服务生命周期抽象。
 
 ## 概念模型
 
@@ -23,8 +23,8 @@
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.10"
-qubit-executor = "0.8"
+qubit-tokio-executor = "0.11"
+qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
