@@ -99,7 +99,7 @@ prepare_dependencies() {
 run_latest() {
     local tool="$1"
     shift
-    exec "$manager_bin" latest --project "$project_root" --tool "$tool" -- "$@"
+    "$manager_bin" latest --project "$project_root" --tool "$tool" -- "$@"
 }
 
 case "$entrypoint" in
@@ -114,6 +114,7 @@ case "$entrypoint" in
     .infra/bin/coverage.sh)
         prepare_dependencies
         run_latest rs-infra-coverage --project "$project_root" collect "$@"
+        "$shared_root/.infra/lib/coverage-report.sh"
         ;;
     .infra/bin/dependency-update.sh)
         prepare_dependencies
