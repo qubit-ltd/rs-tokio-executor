@@ -65,35 +65,12 @@ const DEFAULT_TASK_CAPACITY: usize = 1024;
 pub type TokioBlockingExecutorService = TokioExecutorService;
 
 impl TokioExecutorService {
-    /// Returns a best-effort snapshot of current task counts and lifecycle.
-    ///
-    /// # Returns
-    ///
-    /// The configured task capacity, queued and running counts, and lifecycle.
-    #[must_use]
-    #[inline]
-    pub fn stats(&self) -> TokioExecutorServiceStats {
-        self.state.stats()
-    }
-
-    /// Subscribes to changes that may make another blocking task admissible.
-    ///
-    /// A notification is only a hint; callers must retry submission because
-    /// another producer may consume the available capacity first.
-    ///
-    /// # Returns
-    ///
-    /// A receiver that observes capacity and lifecycle changes.
-    #[must_use]
-    pub fn capacity_changes(&self) -> tokio::sync::watch::Receiver<u64> {
-        self.state.capacity_changes()
-    }
-
     /// Creates a new service instance.
     ///
     /// # Returns
     ///
     /// A Tokio-backed executor service.
+    #[must_use]
     #[inline]
     pub fn new(runtime: Handle) -> Self {
         Self::with_task_capacity(
@@ -116,9 +93,34 @@ impl TokioExecutorService {
     /// # Returns
     ///
     /// A Tokio-backed service configured with the supplied capacity.
+    #[must_use]
     pub fn with_task_capacity(runtime: Handle, task_capacity: NonZeroUsize) -> Self {
         let state = Arc::new(TokioExecutorServiceState::with_task_capacity(task_capacity));
         Self { state, runtime }
+    }
+
+    /// Returns a best-effort snapshot of current task counts and lifecycle.
+    ///
+    /// # Returns
+    ///
+    /// The configured task capacity, queued and running counts, and lifecycle.
+    #[must_use]
+    #[inline]
+    pub fn stats(&self) -> TokioExecutorServiceStats {
+        self.state.stats()
+    }
+
+    /// Subscribes to changes that may make another blocking task admissible.
+    ///
+    /// A notification is only a hint; callers must retry submission because
+    /// another producer may consume the available capacity first.
+    ///
+    /// # Returns
+    ///
+    /// A receiver that observes capacity and lifecycle changes.
+    #[must_use]
+    pub fn capacity_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.state.capacity_changes()
     }
 
     /// Prepares a blocking-task submission context while holding admission.

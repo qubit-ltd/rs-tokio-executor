@@ -9,6 +9,7 @@ use std::future::pending;
 use std::io;
 use std::num::NonZeroUsize;
 
+use qubit_executor::CancelResult;
 use qubit_executor::TaskExecutionError;
 use qubit_executor::service::SubmissionError;
 use qubit_tokio_executor::TokioIoExecutorService;
@@ -65,7 +66,7 @@ async fn test_tokio_io_executor_service_capacity_bounds_and_reuses_completed_slo
         Err(SubmissionError::Saturated)
     ));
 
-    assert_eq!(first.cancel(), qubit_executor::CancelResult::Cancelled);
+    assert_eq!(first.cancel(), CancelResult::Cancelled);
     assert!(matches!(first.await, Err(TaskExecutionError::Cancelled)));
     service
         .spawn(async { Ok::<(), io::Error>(()) })
@@ -98,7 +99,7 @@ async fn test_tokio_io_executor_service_shutdown_precedes_capacity_error() {
         service.spawn(async { Ok::<(), io::Error>(()) }),
         Err(SubmissionError::Shutdown)
     ));
-    assert_eq!(first.cancel(), qubit_executor::CancelResult::Cancelled);
+    assert_eq!(first.cancel(), CancelResult::Cancelled);
     assert!(matches!(first.await, Err(TaskExecutionError::Cancelled)));
     service.await_termination().await;
 }
@@ -115,7 +116,7 @@ async fn test_tokio_io_executor_service_capacity_reuses_slot_after_pre_poll_abor
             Ok::<(), io::Error>(())
         })
         .expect("service should accept the future");
-    assert_eq!(cancelled.cancel(), qubit_executor::CancelResult::Cancelled);
+    assert_eq!(cancelled.cancel(), CancelResult::Cancelled);
     assert!(matches!(cancelled.await, Err(TaskExecutionError::Cancelled)));
 
     service

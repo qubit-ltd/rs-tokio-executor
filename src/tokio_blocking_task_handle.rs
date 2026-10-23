@@ -34,6 +34,11 @@ type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 /// case [`Self::cancel`] reports [`CancelResult::AlreadyRunning`] through the
 /// underlying tracked task state.
 ///
+/// # Type Parameters
+///
+/// * `R` - The task's successful result type.
+/// * `E` - The task's error type.
+///
 /// # Examples
 ///
 /// ```
@@ -62,6 +67,10 @@ pub struct TokioBlockingTaskHandle<R, E> {
 impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// Creates a blocking task handle.
     ///
+    /// # Type Parameters
+    ///
+    /// * `F` - The callback type used to complete queued-task accounting.
+    ///
     /// # Parameters
     ///
     /// * `handle` - Standard tracked task endpoint.
@@ -72,6 +81,7 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// # Returns
     ///
     /// A tracked Tokio blocking task handle.
+    #[must_use]
     #[inline]
     pub(crate) fn new<F>(handle: TrackedTask<R, E>, abort_handle: AbortHandle, cancel_queued_task: F) -> Self
     where
@@ -120,6 +130,7 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     ///
     /// `true` after the task succeeds, fails, panics, is cancelled, or loses
     /// its runner endpoint.
+    #[must_use]
     #[inline]
     pub fn is_done(&self) -> bool
     where

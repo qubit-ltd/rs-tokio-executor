@@ -20,13 +20,13 @@ use tokio::sync::Notify;
 use tokio::sync::watch;
 use tokio::task::AbortHandle;
 
-/// Maximum number of accepted unfinished blocking tasks by default.
-const DEFAULT_TASK_CAPACITY: usize = 1024;
-
 use crate::TokioExecutorServiceStats;
 use crate::executor_service_lifecycle_bits;
 use crate::tokio_task_registration::TaskRegistration;
 use crate::tokio_task_registration::key;
+
+/// Maximum number of accepted unfinished blocking tasks by default.
+const DEFAULT_TASK_CAPACITY: usize = 1024;
 
 /// Abort handle tracked with a service-local task marker.
 struct TrackedAbortHandle {
@@ -134,7 +134,7 @@ impl TokioExecutorServiceState {
         }
     }
 
-    /// Acquires the submission lock while tolerating poisoned locks.
+    /// Acquires the submission lock.
     ///
     /// # Returns
     ///
@@ -331,7 +331,7 @@ impl TokioExecutorServiceState {
         self.terminated_notify.notify_waiters();
     }
 
-    /// Acquires the abort handle list while tolerating poisoned locks.
+    /// Acquires the abort-handle list lock.
     ///
     /// # Returns
     ///

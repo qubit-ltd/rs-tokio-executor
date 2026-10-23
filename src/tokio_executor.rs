@@ -95,6 +95,7 @@ impl TokioExecutor {
     /// # Returns
     ///
     /// An executor permanently bound to `handle`'s runtime.
+    #[must_use]
     #[inline]
     pub fn new(handle: tokio::runtime::Handle) -> Self {
         Self { handle }

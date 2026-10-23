@@ -5,6 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Tests for Tokio blocking task handle future behavior.
+
 use std::io;
 
 use qubit_executor::service::ExecutorService;

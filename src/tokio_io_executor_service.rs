@@ -47,6 +47,40 @@ pub struct TokioIoExecutorService {
 const DEFAULT_TASK_CAPACITY: usize = 1024;
 
 impl TokioIoExecutorService {
+    /// Creates a new service instance.
+    ///
+    /// # Returns
+    ///
+    /// A Tokio-backed executor service for Future-based tasks.
+    #[must_use]
+    #[inline]
+    pub fn new(runtime: tokio::runtime::Handle) -> Self {
+        Self::with_task_capacity(
+            runtime,
+            NonZeroUsize::new(DEFAULT_TASK_CAPACITY).expect("default task capacity should be nonzero"),
+        )
+    }
+
+    /// Creates a service with a maximum number of accepted unfinished futures.
+    ///
+    /// A slot remains occupied until the future completes or Tokio observes an
+    /// abort. Cancelling a future before its first poll also releases the slot
+    /// when Tokio drops the task.
+    ///
+    /// # Parameters
+    ///
+    /// * `runtime` - Tokio runtime used to execute accepted futures.
+    /// * `task_capacity` - Nonzero limit for accepted unfinished futures.
+    ///
+    /// # Returns
+    ///
+    /// A Tokio-backed service configured with the supplied capacity.
+    #[must_use]
+    pub fn with_task_capacity(runtime: tokio::runtime::Handle, task_capacity: NonZeroUsize) -> Self {
+        let state = Arc::new(TokioIoExecutorServiceState::with_task_capacity(task_capacity));
+        Self { state, runtime }
+    }
+
     /// Returns a best-effort snapshot of accepted unfinished futures.
     ///
     /// # Returns
@@ -72,43 +106,17 @@ impl TokioIoExecutorService {
         self.state.capacity_changes()
     }
 
-    /// Creates a new service instance.
-    ///
-    /// # Returns
-    ///
-    /// A Tokio-backed executor service for Future-based tasks.
-    #[inline]
-    pub fn new(runtime: tokio::runtime::Handle) -> Self {
-        Self::with_task_capacity(
-            runtime,
-            NonZeroUsize::new(DEFAULT_TASK_CAPACITY).expect("default task capacity should be nonzero"),
-        )
-    }
-
-    /// Creates a service with a maximum number of accepted unfinished futures.
-    ///
-    /// A slot remains occupied until the future completes or Tokio observes an
-    /// abort. Cancelling a future before its first poll also releases the slot
-    /// when Tokio drops the task.
-    ///
-    /// # Parameters
-    ///
-    /// * `runtime` - Tokio runtime used to execute accepted futures.
-    /// * `task_capacity` - Nonzero limit for accepted unfinished futures.
-    ///
-    /// # Returns
-    ///
-    /// A Tokio-backed service configured with the supplied capacity.
-    pub fn with_task_capacity(runtime: tokio::runtime::Handle, task_capacity: NonZeroUsize) -> Self {
-        let state = Arc::new(TokioIoExecutorServiceState::with_task_capacity(task_capacity));
-        Self { state, runtime }
-    }
-
     /// Accepts an async task and spawns it on the bound Tokio runtime.
     ///
     /// # Parameters
     ///
     /// * `future` - Future to execute on Tokio's async scheduler.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - Future submitted to the service.
+    /// * `R` - Successful output produced by the future.
+    /// * `E` - Error output produced by the future.
     ///
     /// # Returns
     ///

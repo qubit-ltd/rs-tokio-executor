@@ -6,9 +6,12 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::io;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use qubit_executor::service::ExecutorService;
 use qubit_executor::service::ExecutorServiceLifecycle;
@@ -61,7 +64,7 @@ fn test_tokio_executor_service_rejects_callable_submissions_after_shutdown() {
 }
 
 #[test]
-fn test_tokio_executor_service_submit_without_runtime_returns_submission_error() {
+fn test_tokio_executor_service_submit_with_explicit_runtime_handle() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
     let service = TokioExecutorService::new(runtime.handle().clone());
     let handle = service
@@ -99,10 +102,10 @@ async fn test_tokio_executor_service_submit_runs_detached_task() {
 
 #[tokio::test]
 async fn test_tokio_executor_service_stats_and_capacity_changes() {
-    let capacity = std::num::NonZeroUsize::new(2).expect("capacity is nonzero");
+    let capacity = NonZeroUsize::new(2).expect("capacity is nonzero");
     let service = TokioExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
-    let (started_tx, started_rx) = std::sync::mpsc::channel();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
     let running = service
         .submit_tracked_callable(move || {
             started_tx.send(()).expect("test should observe task start");
@@ -111,7 +114,7 @@ async fn test_tokio_executor_service_stats_and_capacity_changes() {
         })
         .expect("first task should be accepted");
     started_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(Duration::from_secs(1))
         .expect("blocking task should start");
     let queued = service
         .submit_tracked_callable(|| Ok::<(), io::Error>(()))
@@ -124,7 +127,7 @@ async fn test_tokio_executor_service_stats_and_capacity_changes() {
     assert_eq!(stats.running, 1);
 
     release_tx.send(()).expect("running task should be released");
-    tokio::time::timeout(std::time::Duration::from_secs(1), changes.changed())
+    tokio::time::timeout(Duration::from_secs(1), changes.changed())
         .await
         .expect("task completion should publish capacity change")
         .expect("capacity notification sender should remain open");

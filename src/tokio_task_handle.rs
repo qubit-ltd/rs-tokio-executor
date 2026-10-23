@@ -25,6 +25,21 @@ use tokio::task::JoinHandle;
 ///
 /// * `R` - The task success value.
 /// * `E` - The task error value.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_tokio_executor::TokioIoExecutorService;
+///
+/// let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+/// let service = TokioIoExecutorService::new(runtime.handle().clone());
+/// let task = service
+///     .spawn(async { Ok::<_, std::io::Error>(42) })
+///     .expect("service should accept the task");
+/// let result = runtime.block_on(task);
+/// assert_eq!(result, Ok(42));
+/// service.shutdown();
+/// ```
 pub struct TokioTaskHandle<R, E> {
     /// Tokio task whose output is the accepted task's final result.
     handle: JoinHandle<TaskResult<R, E>>,
@@ -40,6 +55,7 @@ impl<R, E> TokioTaskHandle<R, E> {
     /// # Returns
     ///
     /// A task handle that can be awaited.
+    #[must_use]
     #[inline]
     pub(crate) fn new(handle: JoinHandle<TaskResult<R, E>>) -> Self {
         Self { handle }
@@ -72,6 +88,7 @@ impl<R, E> TokioTaskHandle<R, E> {
     /// # Returns
     ///
     /// `true` if the Tokio task is complete.
+    #[must_use]
     #[inline]
     pub fn is_done(&self) -> bool {
         self.handle.is_finished()

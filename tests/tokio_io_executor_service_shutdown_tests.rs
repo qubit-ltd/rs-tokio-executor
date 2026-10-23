@@ -30,7 +30,7 @@ async fn test_tokio_io_executor_service_shutdown_waits_for_task_handles() {
 
     let handle = service
         .spawn(async {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
             Ok::<(), io::Error>(())
         })
         .expect("service should accept task");
@@ -76,7 +76,7 @@ async fn test_tokio_io_executor_service_stop_aborts_running_task_handle() {
 
     let handle = service
         .spawn(async {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
             Ok::<(), io::Error>(())
         })
         .expect("service should accept task");

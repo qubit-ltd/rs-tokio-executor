@@ -17,6 +17,12 @@ fn test_testing_reexports_share_and_take_task_slots() {
     slot.accept();
     let shared_slot = share_task_slot(slot);
 
-    assert!(take_task_slot(&shared_slot).is_some());
-    assert!(take_task_slot(&shared_slot).is_none());
+    assert!(
+        take_task_slot(&shared_slot).is_some(),
+        "the shared task slot should be available on the first take"
+    );
+    assert!(
+        take_task_slot(&shared_slot).is_none(),
+        "the shared task slot should be empty after the first take"
+    );
 }

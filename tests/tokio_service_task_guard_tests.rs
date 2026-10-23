@@ -19,11 +19,14 @@ async fn test_tokio_service_task_guard_notifies_termination_when_last_task_drops
             std::thread::sleep(Duration::from_millis(10));
             Ok::<_, io::Error>(())
         })
-        .unwrap();
+        .expect("service should accept the task");
 
     service.shutdown();
-    handle.await.unwrap();
+    handle.await.expect("task should complete successfully");
     service.wait_termination();
 
-    assert!(service.is_terminated());
+    assert!(
+        service.is_terminated(),
+        "service should terminate after its last task completes"
+    );
 }

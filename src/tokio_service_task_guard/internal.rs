@@ -1,0 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+// Implements private task accounting shared by lifecycle callbacks.
+mod tokio_service_task_tracker;
+
+pub(super) use tokio_service_task_tracker::TokioServiceTaskTracker;

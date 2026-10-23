@@ -10,7 +10,16 @@ use std::sync::Arc;
 use qubit_executor::task::spi::TaskSlot;
 use qubit_executor::task::spi::TaskSlotCell;
 
-/// Shared runner-side task slot used by service stop and task execution paths.
+/// Shared runner-side completion endpoint used by task execution and stop
+/// paths.
+///
+/// Clones of this handle refer to the same slot, so only one path can take or
+/// cancel the task's completion endpoint.
+///
+/// # Type Parameters
+///
+/// * `R` - The task's successful result value.
+/// * `E` - The task's error value.
 pub type SharedTaskSlot<R, E> = Arc<TaskSlotCell<R, E>>;
 
 /// Wraps a task slot in shared optional storage.

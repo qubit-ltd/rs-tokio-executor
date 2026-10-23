@@ -5,18 +5,27 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::future::pending;
+use std::io::Error;
+use std::num::NonZeroUsize;
+use std::time::Duration;
+
 use qubit_executor::SubmissionError;
+use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_tokio_executor::TokioIoExecutorService;
+use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
+use tokio::time::timeout;
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown() {
-    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+    let service = TokioIoExecutorService::new(Handle::current());
     let handle = service
         .spawn(async { Ok::<_, &'static str>(5usize) })
         .expect("io service should accept future");
 
-    assert_eq!(5, handle.await.unwrap());
+    assert_eq!(5, handle.await.expect("future should complete successfully"));
 
     service.shutdown();
     assert!(matches!(
@@ -28,7 +37,7 @@ async fn test_tokio_io_executor_service_spawns_future_and_rejects_after_shutdown
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_lifecycle_accessors() {
-    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+    let service = TokioIoExecutorService::new(Handle::current());
 
     assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Running);
     assert!(service.is_running());
@@ -46,10 +55,10 @@ async fn test_tokio_io_executor_service_lifecycle_accessors() {
 
 #[test]
 fn test_tokio_io_executor_service_spawn_uses_explicit_runtime_handle() {
-    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let runtime = Runtime::new().expect("runtime should build");
     let service = TokioIoExecutorService::new(runtime.handle().clone());
     let handle = service
-        .spawn(async { Ok::<usize, std::io::Error>(42) })
+        .spawn(async { Ok::<usize, Error>(42) })
         .expect("submission should succeed");
     assert_eq!(runtime.block_on(handle).expect("task should succeed"), 42);
     service.shutdown();
@@ -57,12 +66,12 @@ fn test_tokio_io_executor_service_spawn_uses_explicit_runtime_handle() {
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_stats_and_capacity_changes() {
-    let capacity = std::num::NonZeroUsize::new(1).expect("capacity is nonzero");
-    let service = TokioIoExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
+    let capacity = NonZeroUsize::new(1).expect("capacity is nonzero");
+    let service = TokioIoExecutorService::with_task_capacity(Handle::current(), capacity);
     let handle = service
         .spawn(async {
-            std::future::pending::<()>().await;
-            Ok::<(), std::io::Error>(())
+            pending::<()>().await;
+            Ok::<(), Error>(())
         })
         .expect("one pending future should be accepted");
     let mut changes = service.capacity_changes();
@@ -71,20 +80,17 @@ async fn test_tokio_io_executor_service_stats_and_capacity_changes() {
     assert_eq!(stats.task_capacity, 1);
     assert_eq!(stats.accepted_unfinished, 1);
     assert!(matches!(
-        service.spawn(async { Ok::<(), std::io::Error>(()) }),
+        service.spawn(async { Ok::<(), Error>(()) }),
         Err(SubmissionError::Saturated)
     ));
 
     let report = service.stop();
     assert_eq!(report.cancelled, 1);
-    tokio::time::timeout(std::time::Duration::from_secs(1), changes.changed())
+    timeout(Duration::from_secs(1), changes.changed())
         .await
         .expect("stop should publish a capacity change")
         .expect("capacity notification sender should remain open");
-    assert!(matches!(
-        handle.await,
-        Err(qubit_executor::TaskExecutionError::Cancelled)
-    ));
+    assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
     service.await_termination().await;
     assert_eq!(service.stats().accepted_unfinished, 0);
 }
