@@ -71,16 +71,17 @@ async fn test_tokio_executor_service_wait_termination_waits_for_tasks() {
     let (completed_tx, completed_rx) = mpsc::channel();
     let waiter_service = service.clone();
     let waiter = std::thread::spawn(move || {
-        entered_tx
-            .send(())
-            .expect("test should receive waiter entry signal");
+        entered_tx.send(()).expect("test should receive waiter entry signal");
         waiter_service.wait_termination();
         completed_tx.send(()).expect("test should receive waiter completion");
     });
     entered_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("waiter should enter before the completion check");
-    assert!(matches!(completed_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        completed_rx.recv_timeout(Duration::from_millis(25)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
 
     release.release();
     completed_rx
@@ -114,10 +115,7 @@ async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
     service.shutdown();
     let termination = service.await_termination();
     tokio::pin!(termination);
-    let first_poll = std::future::poll_fn(|context| {
-        std::task::Poll::Ready(termination.as_mut().poll(context))
-    })
-    .await;
+    let first_poll = std::future::poll_fn(|context| std::task::Poll::Ready(termination.as_mut().poll(context))).await;
     assert!(first_poll.is_pending());
 
     release.release();

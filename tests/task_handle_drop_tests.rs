@@ -31,10 +31,9 @@ impl Drop for ReleaseOnDrop {
 }
 
 #[tokio::test]
-async fn dropping_blocking_handle_does_not_release_capacity_or_cancel_work() {
+async fn test_dropping_blocking_handle_does_not_release_capacity_or_cancel_work() {
     let capacity = NonZeroUsize::new(1).expect("capacity should be nonzero");
-    let service =
-        TokioExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
+    let service = TokioExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let mut release = ReleaseOnDrop(Some(release_tx));
@@ -44,9 +43,7 @@ async fn dropping_blocking_handle_does_not_release_capacity_or_cancel_work() {
         .submit_callable(move || {
             started_tx.send(()).expect("test should observe task start");
             release_rx.recv().expect("test should release task");
-            ran_tx
-                .send(())
-                .expect("test should observe task completion");
+            ran_tx.send(()).expect("test should observe task completion");
             Ok::<(), io::Error>(())
         })
         .expect("first task should be accepted");
@@ -76,10 +73,7 @@ async fn dropping_blocking_handle_does_not_release_capacity_or_cancel_work() {
             if service.stats().running == 0 {
                 break;
             }
-            changes
-                .changed()
-                .await
-                .expect("service should publish a change");
+            changes.changed().await.expect("service should publish a change");
         }
     })
     .await
@@ -92,10 +86,9 @@ async fn dropping_blocking_handle_does_not_release_capacity_or_cancel_work() {
 }
 
 #[tokio::test]
-async fn dropping_io_handle_detaches_future_until_it_completes() {
+async fn test_dropping_io_handle_detaches_future_until_it_completes() {
     let capacity = NonZeroUsize::new(1).expect("capacity should be nonzero");
-    let service =
-        TokioIoExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
+    let service = TokioIoExecutorService::with_task_capacity(tokio::runtime::Handle::current(), capacity);
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let (release_tx, release_rx) = tokio::sync::oneshot::channel();
     let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -120,9 +113,7 @@ async fn dropping_io_handle_detaches_future_until_it_completes() {
         service.spawn(async { Ok::<(), io::Error>(()) }),
         Err(SubmissionError::Saturated)
     ));
-    release_tx
-        .send(())
-        .expect("detached future should be released");
+    release_tx.send(()).expect("detached future should be released");
     tokio::time::timeout(OBSERVE_TIMEOUT, async {
         while service.stats().accepted_unfinished != 0 {
             tokio::task::yield_now().await;
@@ -140,7 +131,7 @@ async fn dropping_io_handle_detaches_future_until_it_completes() {
 }
 
 #[tokio::test]
-async fn timing_out_while_waiting_preserves_io_handle_for_explicit_cancel() {
+async fn test_timing_out_while_waiting_preserves_io_handle_for_explicit_cancel() {
     let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let handle = service
@@ -161,10 +152,7 @@ async fn timing_out_while_waiting_preserves_io_handle_for_explicit_cancel() {
             .await
             .is_err()
     );
-    assert!(
-        !handle.is_done(),
-        "timeout should drop only the wait, not the task"
-    );
+    assert!(!handle.is_done(), "timeout should drop only the wait, not the task");
     assert_eq!(service.stats().accepted_unfinished, 1);
     assert_eq!(handle.cancel(), CancelResult::Cancelled);
     assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
@@ -174,7 +162,7 @@ async fn timing_out_while_waiting_preserves_io_handle_for_explicit_cancel() {
 }
 
 #[tokio::test]
-async fn io_service_stop_cancels_accepted_pending_future() {
+async fn test_io_service_stop_cancels_accepted_pending_future() {
     let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let handle = service
@@ -198,7 +186,7 @@ async fn io_service_stop_cancels_accepted_pending_future() {
 }
 
 #[tokio::test]
-async fn stopping_blocking_service_does_not_cancel_started_closure() {
+async fn test_stopping_blocking_service_does_not_cancel_started_closure() {
     let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();

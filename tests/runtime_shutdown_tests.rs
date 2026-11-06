@@ -30,7 +30,7 @@ impl Drop for ReleaseOnDrop {
 }
 
 #[test]
-fn tokio_executor_finishes_started_blocking_task_after_background_shutdown() {
+fn test_tokio_executor_finishes_started_blocking_task_after_background_shutdown() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
     let executor = TokioExecutor::new(runtime.handle().clone());
     let (started_tx, started_rx) = mpsc::channel();
@@ -49,14 +49,10 @@ fn tokio_executor_finishes_started_blocking_task_after_background_shutdown() {
     // Runtime destruction occurs on this ordinary test thread, never inside
     // a Tokio async context. Background shutdown avoids waiting on the gate.
     runtime.shutdown_background();
-    release_tx
-        .send(())
-        .expect("running closure should be released");
+    release_tx.send(()).expect("running closure should be released");
 
     let observer = tokio::runtime::Runtime::new().expect("observer runtime should build");
-    let result = observer.block_on(async {
-        tokio::time::timeout(OBSERVE_TIMEOUT, async move { handle.await }).await
-    });
+    let result = observer.block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { handle.await }).await });
     assert_eq!(
         result
             .expect("task should finish after release")
@@ -66,7 +62,7 @@ fn tokio_executor_finishes_started_blocking_task_after_background_shutdown() {
 }
 
 #[test]
-fn blocking_service_waits_for_started_task_after_runtime_background_shutdown() {
+fn test_blocking_service_waits_for_started_task_after_runtime_background_shutdown() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
     let service = TokioExecutorService::new(runtime.handle().clone());
     let (started_tx, started_rx) = mpsc::channel();
@@ -83,35 +79,30 @@ fn blocking_service_waits_for_started_task_after_runtime_background_shutdown() {
         .expect("blocking closure should start");
 
     runtime.shutdown_background();
-    release_tx
-        .send(())
-        .expect("running closure should be released");
+    release_tx.send(()).expect("running closure should be released");
 
     assert_eq!(handle.get().expect("blocking task should finish"), 42);
+    service.shutdown();
+    assert!(service.wait_termination_timeout(OBSERVE_TIMEOUT));
     let stats = service.stats();
     assert_eq!(stats.queued, 0);
     assert_eq!(stats.running, 0);
-    service.shutdown();
-    assert!(service.wait_termination_timeout(OBSERVE_TIMEOUT));
     assert!(service.is_terminated());
 }
 
 #[test]
-fn io_service_drops_pending_future_and_terminates_after_runtime_shutdown() {
+fn test_io_service_drops_pending_future_and_terminates_after_runtime_shutdown() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
     let service = TokioIoExecutorService::new(runtime.handle().clone());
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-    let handle = runtime.block_on(async {
-        let handle = service
-            .spawn(async move {
-                let _ = started_tx.send(());
-                std::future::pending::<()>().await;
-                Ok::<(), io::Error>(())
-            })
-            .expect("service should accept task while runtime is alive");
-        started_rx.await.expect("future should be polled");
-        handle
-    });
+    let handle = service
+        .spawn(async move {
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+            Ok::<(), io::Error>(())
+        })
+        .expect("service should accept task while runtime is alive");
+    runtime.block_on(started_rx).expect("future should be polled");
 
     runtime.shutdown_background();
     let observer = tokio::runtime::Runtime::new().expect("observer runtime should build");
@@ -126,7 +117,7 @@ fn io_service_drops_pending_future_and_terminates_after_runtime_shutdown() {
 }
 
 #[test]
-fn blocking_service_runtime_closes_with_ordinary_and_tracked_tasks_queued() {
+fn test_blocking_service_runtime_closes_with_ordinary_and_tracked_tasks_queued() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .max_blocking_threads(1)
         .enable_all()
@@ -137,9 +128,7 @@ fn blocking_service_runtime_closes_with_ordinary_and_tracked_tasks_queued() {
     let (release_tx, release_rx) = mpsc::channel();
     let _release_guard = ReleaseOnDrop(Some(release_tx));
     let blocker = runtime.handle().spawn_blocking(move || {
-        started_tx
-            .send(())
-            .expect("test should observe blocker start");
+        started_tx.send(()).expect("test should observe blocker start");
         release_rx.recv().expect("test should release blocker");
     });
     started_rx
@@ -150,29 +139,19 @@ fn blocking_service_runtime_closes_with_ordinary_and_tracked_tasks_queued() {
     let (tracked_started_tx, tracked_started_rx) = mpsc::channel();
     let ordinary = service
         .submit_callable(move || {
-            ordinary_started_tx
-                .send(())
-                .expect("observe ordinary task start");
+            ordinary_started_tx.send(()).expect("observe ordinary task start");
             Ok::<usize, io::Error>(1)
         })
         .expect("ordinary task should be accepted into the queue");
     let tracked = service
         .submit_tracked_callable(move || {
-            tracked_started_tx
-                .send(())
-                .expect("observe tracked task start");
+            tracked_started_tx.send(()).expect("observe tracked task start");
             Ok::<usize, io::Error>(2)
         })
         .expect("tracked task should be accepted into the queue");
     assert_eq!(service.stats().queued, 2);
-    assert!(matches!(
-        ordinary_started_rx.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
-    assert!(matches!(
-        tracked_started_rx.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
+    assert!(matches!(ordinary_started_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(tracked_started_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
     runtime.shutdown_background();
     // Releasing the worker lets Tokio start accepted queued work. The guard
     // also releases it if an assertion above unwinds.
@@ -185,14 +164,10 @@ fn blocking_service_runtime_closes_with_ordinary_and_tracked_tasks_queued() {
         .expect("blocking worker should not panic");
     let ordinary_observation = tokio::runtime::Runtime::new()
         .expect("ordinary observer runtime should build")
-        .block_on(async {
-            tokio::time::timeout(OBSERVE_TIMEOUT, async move { ordinary.await }).await
-        });
+        .block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { ordinary.await }).await });
     let tracked_observation = tokio::runtime::Runtime::new()
         .expect("tracked observer runtime should build")
-        .block_on(async {
-            tokio::time::timeout(OBSERVE_TIMEOUT, async move { tracked.await }).await
-        });
+        .block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { tracked.await }).await });
     assert_eq!(
         ordinary_observation
             .expect("ordinary task should resolve")
@@ -220,19 +195,17 @@ fn blocking_service_runtime_closes_with_ordinary_and_tracked_tasks_queued() {
 }
 
 #[test]
-fn io_service_runtime_closes_before_accepted_future_is_first_polled() {
+fn test_io_service_runtime_closes_before_accepted_future_is_first_polled() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("runtime should build");
     let service = TokioIoExecutorService::new(runtime.handle().clone());
-    // A current-thread runtime does not poll a newly spawned task again until
-    // block_on is entered, so this returns an accepted but unpolled future.
-    let handle = runtime.block_on(async {
-        service
-            .spawn(async { Ok::<usize, io::Error>(3) })
-            .expect("future should be accepted")
-    });
+    // The current-thread runtime has not been entered, so spawning through its
+    // handle leaves this accepted future unpolled.
+    let handle = service
+        .spawn(async { Ok::<usize, io::Error>(3) })
+        .expect("future should be accepted");
     assert_eq!(service.stats().accepted_unfinished, 1);
     runtime.shutdown_background();
 
@@ -248,7 +221,7 @@ fn io_service_runtime_closes_before_accepted_future_is_first_polled() {
 }
 
 #[test]
-fn services_accept_submission_after_bound_runtime_shutdown_without_panicking() {
+fn test_services_accept_submission_after_bound_runtime_shutdown_without_panicking() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
     let handle = runtime.handle().clone();
     runtime.shutdown_background();
@@ -258,45 +231,31 @@ fn services_accept_submission_after_bound_runtime_shutdown_without_panicking() {
     // that a closed runtime must map to SubmissionError::Shutdown.
     let blocking = TokioExecutorService::new(handle.clone());
     let ordinary = blocking.submit_callable(|| Ok::<usize, io::Error>(1));
-    assert!(
-        ordinary.is_ok(),
-        "closed-runtime submission should not panic"
-    );
+    assert!(ordinary.is_ok(), "closed-runtime submission should not panic");
     let tracked = blocking.submit_tracked_callable(|| Ok::<usize, io::Error>(2));
-    assert!(
-        tracked.is_ok(),
-        "closed-runtime tracked submission should not panic"
-    );
+    assert!(tracked.is_ok(), "closed-runtime tracked submission should not panic");
     blocking.shutdown();
     let blocking_terminated = blocking.wait_termination_timeout(OBSERVE_TIMEOUT);
     let blocking_stats = blocking.stats();
-    assert!(
-        blocking_terminated,
-        "accepted tasks should leave service accounting"
-    );
+    assert!(blocking_terminated, "accepted tasks should leave service accounting");
     assert_eq!(blocking_stats.queued, 0);
     assert_eq!(blocking_stats.running, 0);
     if let Ok(task) = ordinary {
         let observer = tokio::runtime::Runtime::new().expect("ordinary observer should build");
-        let result = observer.block_on(async {
-            tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await
-        });
+        let result =
+            observer.block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await });
         assert!(matches!(result, Ok(Err(TaskExecutionError::Dropped))));
     }
     if let Ok(task) = tracked {
         let observer = tokio::runtime::Runtime::new().expect("tracked observer should build");
-        let result = observer.block_on(async {
-            tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await
-        });
+        let result =
+            observer.block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await });
         assert!(matches!(result, Ok(Err(TaskExecutionError::Dropped))));
     }
 
     let io_service = TokioIoExecutorService::new(handle);
     let io_task = io_service.spawn(async { Ok::<usize, io::Error>(2) });
-    assert!(
-        io_task.is_ok(),
-        "closed-runtime submission should not panic"
-    );
+    assert!(io_task.is_ok(), "closed-runtime submission should not panic");
     io_service.shutdown();
     let observer = tokio::runtime::Runtime::new().expect("observer runtime should build");
     if let Ok(task) = io_task {
@@ -310,7 +269,7 @@ fn services_accept_submission_after_bound_runtime_shutdown_without_panicking() {
 }
 
 #[test]
-fn tokio_executor_runtime_closes_while_task_is_queued_before_start() {
+fn test_tokio_executor_runtime_closes_while_task_is_queued_before_start() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .max_blocking_threads(1)
         .enable_all()
@@ -321,9 +280,7 @@ fn tokio_executor_runtime_closes_while_task_is_queued_before_start() {
     let (release_tx, release_rx) = mpsc::channel();
     let release_guard = ReleaseOnDrop(Some(release_tx));
     let blocker = runtime.handle().spawn_blocking(move || {
-        started_tx
-            .send(())
-            .expect("test should observe blocker start");
+        started_tx.send(()).expect("test should observe blocker start");
         release_rx.recv().expect("test should release blocker");
     });
     started_rx
@@ -337,10 +294,7 @@ fn tokio_executor_runtime_closes_while_task_is_queued_before_start() {
             Ok::<usize, io::Error>(7)
         })
         .expect("task should be accepted into the blocking queue");
-    assert!(matches!(
-        task_started_rx.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
+    assert!(matches!(task_started_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
     runtime.shutdown_background();
     drop(release_guard);
 
@@ -349,8 +303,7 @@ fn tokio_executor_runtime_closes_while_task_is_queued_before_start() {
         .block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, blocker).await })
         .expect("blocker should finish")
         .expect("blocker should not panic");
-    let result = observer
-        .block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await });
+    let result = observer.block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await });
     assert_eq!(
         result
             .expect("queued task handle should resolve")
@@ -363,7 +316,7 @@ fn tokio_executor_runtime_closes_while_task_is_queued_before_start() {
 }
 
 #[test]
-fn tokio_executor_submission_after_runtime_shutdown_returns_dropped_result() {
+fn test_tokio_executor_submission_after_runtime_shutdown_returns_dropped_result() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
     let executor = TokioExecutor::new(runtime.handle().clone());
     runtime.shutdown_background();
@@ -377,8 +330,7 @@ fn tokio_executor_submission_after_runtime_shutdown_returns_dropped_result() {
         })
         .expect("TokioExecutor does not report runtime shutdown as submission error");
     let observer = tokio::runtime::Runtime::new().expect("observer runtime should build");
-    let result = observer
-        .block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await });
+    let result = observer.block_on(async { tokio::time::timeout(OBSERVE_TIMEOUT, async move { task.await }).await });
     assert!(matches!(
         result.expect("accepted task handle should resolve"),
         Err(TaskExecutionError::Dropped)
