@@ -187,10 +187,20 @@ impl TokioExecutorService {
         Self { state, runtime }
     }
 
-    /// Attempts to accept a runnable while retaining it if submission is rejected.
+    /// Attempts to accept a runnable while retaining it if submission is
+    /// rejected.
     ///
-    /// A rejected runnable is returned unchanged and is neither run nor dropped.
-    /// Shutdown is checked before capacity saturation.
+    /// A rejected runnable is returned unchanged and is neither run nor
+    /// dropped. Shutdown is checked before capacity saturation.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T` - The runnable to submit.
+    /// * `E` - The runnable's error type.
+    ///
+    /// # Parameters
+    ///
+    /// * `task` - The runnable to submit.
     pub fn try_submit<T, E>(&self, task: T) -> Result<(), RejectedTask<T>>
     where
         T: Runnable<E> + Send + 'static,
@@ -215,10 +225,21 @@ impl TokioExecutorService {
         Ok(())
     }
 
-    /// Attempts to accept a callable while retaining it if submission is rejected.
+    /// Attempts to accept a callable while retaining it if submission is
+    /// rejected.
     ///
     /// A rejected callable is returned unchanged and has not been called.
     /// Shutdown is checked before capacity saturation.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `C` - The callable to submit.
+    /// * `R` - The callable's result type.
+    /// * `E` - The callable's error type.
+    ///
+    /// # Parameters
+    ///
+    /// * `task` - The callable to submit.
     pub fn try_submit_callable<C, R, E>(&self, task: C) -> Result<TaskHandle<R, E>, RejectedTask<C>>
     where
         C: Callable<R, E> + Send + 'static,
@@ -252,6 +273,16 @@ impl TokioExecutorService {
     ///
     /// A rejected callable is returned unchanged and has not been called.
     /// Shutdown is checked before capacity saturation.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `C` - The callable to submit.
+    /// * `R` - The callable's result type.
+    /// * `E` - The callable's error type.
+    ///
+    /// # Parameters
+    ///
+    /// * `task` - The callable to submit.
     pub fn try_submit_tracked_callable<C, R, E>(
         &self,
         task: C,
@@ -282,11 +313,7 @@ impl TokioExecutorService {
             },
             move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
         );
-        Ok(TokioBlockingTaskHandle::new(
-            handle,
-            abort_handle,
-            cancel_queued_task,
-        ))
+        Ok(TokioBlockingTaskHandle::new(handle, abort_handle, cancel_queued_task))
     }
 
     /// Prepares a blocking-task submission context while holding admission.

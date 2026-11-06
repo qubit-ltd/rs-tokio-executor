@@ -253,6 +253,8 @@ use std::sync::atomic::Ordering;
 use qubit_executor::service::SubmissionError;
 use qubit_tokio_executor::TokioIoExecutorService;
 
+type RetryFuture = Pin<Box<dyn Future<Output = Result<usize, io::Error>> + Send>>;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service = TokioIoExecutorService::with_task_capacity(
@@ -272,8 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Keep the original pinned, non-Clone future until admission succeeds.
     let calls = Arc::new(AtomicUsize::new(0));
     let future_calls = Arc::clone(&calls);
-    let mut future: Option<Pin<Box<dyn Future<Output = Result<usize, io::Error>> + Send>>> =
-        Some(Box::pin(async move {
+    let mut future: Option<RetryFuture> = Some(Box::pin(async move {
             future_calls.fetch_add(1, Ordering::SeqCst);
             Ok(40 + 2)
         }));

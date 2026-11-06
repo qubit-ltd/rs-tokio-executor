@@ -151,14 +151,23 @@ impl TokioIoExecutorService {
         R: Send + 'static,
         E: Send + 'static,
     {
-        self.try_spawn(future)
-            .map_err(|rejected| rejected.into_parts().0)
+        self.try_spawn(future).map_err(|rejected| rejected.into_parts().0)
     }
 
     /// Attempts to accept an async task while retaining its future if rejected.
     ///
     /// A rejected future is returned unchanged; it has not been polled or
     /// dropped. Shutdown is checked before capacity saturation.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - The future to submit.
+    /// * `R` - The future's result type.
+    /// * `E` - The future's error type.
+    ///
+    /// # Parameters
+    ///
+    /// * `future` - The future to submit.
     pub fn try_spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, RejectedTask<F>>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,

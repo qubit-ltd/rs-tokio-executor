@@ -29,6 +29,7 @@ mod tokio_task_slot_cancellation;
 #[cfg(test)]
 mod tests;
 
+pub use rejected_task::RejectedTask;
 pub use tokio_blocking_task_handle::TokioBlockingTaskHandle;
 pub use tokio_executor::TokioExecutor;
 pub use tokio_executor_service::TokioBlockingExecutorService;
@@ -36,5 +37,4 @@ pub use tokio_executor_service::TokioExecutorService;
 pub use tokio_executor_service_stats::TokioExecutorServiceStats;
 pub use tokio_io_executor_service::TokioIoExecutorService;
 pub use tokio_io_executor_service_stats::TokioIoExecutorServiceStats;
-pub use rejected_task::RejectedTask;
 pub use tokio_task_handle::TokioTaskHandle;

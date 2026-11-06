@@ -75,11 +75,10 @@ fn test_shutdown_rejections_return_original_tasks_for_all_submission_apis() {
     assert_eq!(callable_calls.load(Ordering::SeqCst), 1);
 
     let tracked_callable = || Ok::<usize, io::Error>(7);
-    let rejected =
-        match blocking.try_submit_tracked_callable::<_, usize, io::Error>(tracked_callable) {
-            Err(rejected) => rejected,
-            Ok(_) => panic!("shutdown should reject tracked callable"),
-        };
+    let rejected = match blocking.try_submit_tracked_callable::<_, usize, io::Error>(tracked_callable) {
+        Err(rejected) => rejected,
+        Ok(_) => panic!("shutdown should reject tracked callable"),
+    };
     assert!(matches!(rejected.reason(), SubmissionError::Shutdown));
     let (_, mut tracked_callable) = rejected.into_parts();
     assert_eq!(
@@ -102,9 +101,7 @@ fn test_shutdown_rejections_return_original_tasks_for_all_submission_apis() {
     };
     assert!(matches!(rejected.reason(), SubmissionError::Shutdown));
     let (_, future) = rejected.into_parts();
-    runtime
-        .block_on(future)
-        .expect("recovered future should run");
+    runtime.block_on(future).expect("recovered future should run");
     assert_eq!(future_calls.load(Ordering::SeqCst), 1);
 }
 
@@ -114,9 +111,9 @@ fn test_rejected_task_debug_does_not_require_or_format_task() {
     let service = TokioExecutorService::new(runtime.handle().clone());
     service.shutdown();
     let task = String::from("private task details");
-    let rejected = match service.try_submit_callable::<_, bool, io::Error>(move || {
-        Ok::<bool, io::Error>(task == "private task details")
-    }) {
+    let rejected = match service
+        .try_submit_callable::<_, bool, io::Error>(move || Ok::<bool, io::Error>(task == "private task details"))
+    {
         Err(rejected) => rejected,
         Ok(_) => panic!("shutdown should reject callable"),
     };
@@ -142,9 +139,7 @@ fn test_saturated_callable_can_be_recovered_and_submitted_once() {
     let mut release = ReleaseOnDrop(Some(release_tx));
     let blocker = service
         .submit_callable(move || {
-            started_tx
-                .send(())
-                .expect("test should observe blocker start");
+            started_tx.send(()).expect("test should observe blocker start");
             release_rx.recv().expect("test should release blocker");
             Ok::<(), io::Error>(())
         })
@@ -217,9 +212,7 @@ fn test_saturated_non_unpin_future_can_be_recovered_and_submitted_once() {
         let _ = blocker.cancel();
         let _ = blocker.await;
     });
-    let result = service
-        .try_spawn(future)
-        .expect("recovered future should be accepted");
+    let result = service.try_spawn(future).expect("recovered future should be accepted");
     assert_eq!(runtime.block_on(result).expect("future should finish"), 42);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     service.shutdown();
@@ -246,12 +239,7 @@ fn test_shutdown_reason_precedes_saturation() {
     };
     assert!(matches!(rejected.reason(), SubmissionError::Shutdown));
     let (_, future) = rejected.into_parts();
-    assert_eq!(
-        runtime
-            .block_on(future)
-            .expect("recovered future should run"),
-        42
-    );
+    assert_eq!(runtime.block_on(future).expect("recovered future should run"), 42);
     runtime.block_on(async {
         let _ = blocker.cancel();
         let _ = blocker.await;
@@ -275,9 +263,7 @@ fn test_tracked_callable_try_submission_can_cancel_queued_work() {
     let mut release = ReleaseOnDrop(Some(release_tx));
     let blocker = service
         .submit_callable(move || {
-            started_tx
-                .send(())
-                .expect("test should observe blocker start");
+            started_tx.send(()).expect("test should observe blocker start");
             release_rx.recv().expect("test should release blocker");
             Ok::<(), io::Error>(())
         })

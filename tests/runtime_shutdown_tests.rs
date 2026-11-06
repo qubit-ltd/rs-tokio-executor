@@ -6,7 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::io;
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -66,10 +67,7 @@ fn test_io_submission_after_runtime_shutdown_child() {
         let _probe = probe;
         Ok::<(), io::Error>(())
     });
-    assert!(
-        result.is_ok(),
-        "closed-runtime admission retains its existing result"
-    );
+    assert!(result.is_ok(), "closed-runtime admission retains its existing result");
     assert_eq!(
         service.stats().accepted_unfinished,
         0,
@@ -95,10 +93,7 @@ fn test_io_submission_after_runtime_shutdown_does_not_deadlock_on_drop() {
         let deadline = Instant::now() + OBSERVE_TIMEOUT;
         loop {
             if let Some(status) = child.try_wait().expect("child status should be readable") {
-                assert!(
-                    status.success(),
-                    "child test for {action} should finish successfully"
-                );
+                assert!(status.success(), "child test for {action} should finish successfully");
                 break;
             }
             if Instant::now() >= deadline {

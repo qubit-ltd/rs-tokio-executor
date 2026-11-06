@@ -19,6 +19,10 @@ use qubit_executor::service::SubmissionError;
 /// because captured values may contain private data, and it does not require
 /// the task type to implement `Debug`.
 ///
+/// # Type Parameters
+///
+/// * `T` - The original runnable, callable, or future rejected by the service.
+///
 /// # Example
 ///
 /// ```
@@ -43,7 +47,9 @@ use qubit_executor::service::SubmissionError;
 /// assert_eq!(runtime.block_on(future).expect("recovered future should run"), 42);
 /// ```
 pub struct RejectedTask<T> {
+    /// The reason the service rejected the task.
     reason: SubmissionError,
+    /// The original task returned to the caller.
     task: T,
 }
 
@@ -61,12 +67,26 @@ impl<T> RejectedTask<T> {
     }
 
     /// Creates a rejected task from its reason and original ownership value.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T` - The original task value.
+    ///
+    /// # Parameters
+    ///
+    /// * `reason` - Why the service rejected the task.
+    /// * `task` - The original task value.
     pub(crate) fn new(reason: SubmissionError, task: T) -> Self {
         Self { reason, task }
     }
 }
 
 impl<T> fmt::Debug for RejectedTask<T> {
+    /// Formats the rejection reason without formatting the task.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Formatter receiving the debug representation.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RejectedTask")
@@ -76,6 +96,11 @@ impl<T> fmt::Debug for RejectedTask<T> {
 }
 
 impl<T> fmt::Display for RejectedTask<T> {
+    /// Formats the rejection reason.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Formatter receiving the display representation.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.reason.fmt(formatter)
     }

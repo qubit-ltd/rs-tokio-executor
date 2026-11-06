@@ -72,10 +72,7 @@ fn test_current_thread_runtime_driver_watchdog() {
     let deadline = Instant::now() + WATCHDOG_TIMEOUT;
     loop {
         if let Some(status) = child.try_wait().expect("child status should be readable") {
-            assert!(
-                status.success(),
-                "current-thread child should finish successfully"
-            );
+            assert!(status.success(), "current-thread child should finish successfully");
             return;
         }
         if Instant::now() >= deadline {
