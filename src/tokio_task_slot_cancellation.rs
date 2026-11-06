@@ -11,7 +11,12 @@ use qubit_executor::task::spi::TaskSlot;
 use qubit_executor::task::spi::TaskSlotCell;
 
 /// Shared runner-side task slot used by service stop and task execution paths.
-pub type SharedTaskSlot<R, E> = Arc<TaskSlotCell<R, E>>;
+///
+/// # Type Parameters
+///
+/// * `R` - Value returned by the task.
+/// * `E` - Error returned by the task.
+pub(crate) type SharedTaskSlot<R, E> = Arc<TaskSlotCell<R, E>>;
 
 /// Wraps a task slot in shared optional storage.
 ///
@@ -23,8 +28,13 @@ pub type SharedTaskSlot<R, E> = Arc<TaskSlotCell<R, E>>;
 ///
 /// A shared optional slot that can be taken by either the runner path or the
 /// queued-cancellation path.
+///
+/// # Type Parameters
+///
+/// * `R` - Value returned by the task.
+/// * `E` - Error returned by the task.
 #[inline]
-pub fn share_task_slot<R, E>(slot: TaskSlot<R, E>) -> SharedTaskSlot<R, E> {
+pub(crate) fn share_task_slot<R, E>(slot: TaskSlot<R, E>) -> SharedTaskSlot<R, E> {
     Arc::new(TaskSlotCell::new(slot))
 }
 
@@ -37,7 +47,12 @@ pub fn share_task_slot<R, E>(slot: TaskSlot<R, E>) -> SharedTaskSlot<R, E> {
 /// # Returns
 ///
 /// `Some(TaskSlot)` if this call won the slot ownership race, otherwise `None`.
-pub fn take_task_slot<R, E>(slot: &SharedTaskSlot<R, E>) -> Option<TaskSlot<R, E>> {
+///
+/// # Type Parameters
+///
+/// * `R` - Value returned by the task.
+/// * `E` - Error returned by the task.
+pub(crate) fn take_task_slot<R, E>(slot: &SharedTaskSlot<R, E>) -> Option<TaskSlot<R, E>> {
     slot.take()
 }
 
@@ -55,7 +70,13 @@ pub fn take_task_slot<R, E>(slot: &SharedTaskSlot<R, E>) -> Option<TaskSlot<R, E
 /// # Returns
 ///
 /// `true` if queued service accounting was completed by this call.
-pub fn cancel_unstarted_task_slot_if_queued<R, E, F>(slot: &SharedTaskSlot<R, E>, finish_queued: F) -> bool
+///
+/// # Type Parameters
+///
+/// * `R` - Value returned by the task.
+/// * `E` - Error returned by the task.
+/// * `F` - Callback type used to finish queued accounting.
+pub(crate) fn cancel_unstarted_task_slot_if_queued<R, E, F>(slot: &SharedTaskSlot<R, E>, finish_queued: F) -> bool
 where
     F: FnOnce() -> bool,
 {

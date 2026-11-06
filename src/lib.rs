@@ -24,8 +24,8 @@ mod tokio_task_handle;
 mod tokio_task_registration;
 mod tokio_task_slot_cancellation;
 
-#[doc(hidden)]
-pub mod testing;
+#[cfg(test)]
+mod tests;
 
 pub use tokio_blocking_task_handle::TokioBlockingTaskHandle;
 pub use tokio_executor::TokioExecutor;

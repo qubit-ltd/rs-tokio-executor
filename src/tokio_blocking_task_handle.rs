@@ -49,6 +49,11 @@ type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 /// service.shutdown();
 /// service.wait_termination();
 /// ```
+///
+/// # Type Parameters
+///
+/// * `R` - Result value returned by the blocking task.
+/// * `E` - Error value returned by the blocking task.
 pub struct TokioBlockingTaskHandle<R, E> {
     /// Standard tracked task endpoint used for result and status observation.
     handle: TrackedTask<R, E>,
@@ -72,6 +77,10 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// # Returns
     ///
     /// A tracked Tokio blocking task handle.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - Callback type used to finish queued-task accounting.
     #[inline]
     pub(crate) fn new<F>(handle: TrackedTask<R, E>, abort_handle: AbortHandle, cancel_queued_task: F) -> Self
     where
@@ -218,7 +227,9 @@ where
 }
 
 impl<R, E> IntoFuture for TokioBlockingTaskHandle<R, E> {
+    /// Final result returned by the blocking task.
     type Output = TaskResult<R, E>;
+    /// Future that waits for the blocking task result.
     type IntoFuture = TaskHandleFuture<R, E>;
 
     /// Converts this tracked handle into a future resolving to the task result.

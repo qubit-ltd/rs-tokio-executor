@@ -79,6 +79,7 @@ impl<R, E> TokioTaskHandle<R, E> {
 }
 
 impl<R, E> Future for TokioTaskHandle<R, E> {
+    /// Final task result or execution error.
     type Output = TaskResult<R, E>;
 
     /// Polls the underlying Tokio task.
@@ -112,6 +113,10 @@ impl<R, E> Future for TokioTaskHandle<R, E> {
 ///
 /// [`TaskExecutionError::Cancelled`] for aborted tasks, otherwise
 /// [`TaskExecutionError::Panicked`].
+///
+/// # Type Parameters
+///
+/// * `E` - Error type used in the task result.
 fn join_error_to_task_error<E>(error: JoinError) -> TaskExecutionError<E> {
     if error.is_cancelled() {
         TaskExecutionError::Cancelled

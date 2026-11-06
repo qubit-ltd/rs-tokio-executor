@@ -10,12 +10,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 /// Tracks whether a service-local task has finished registration work.
-pub(crate) struct TaskRegistration {
+pub(crate) struct TokioTaskRegistration {
     /// Atomic completion flag shared by task lifecycle paths.
     finished: AtomicBool,
 }
 
-impl TaskRegistration {
+impl TokioTaskRegistration {
     /// Allocates a registration marker in its unfinished state.
     ///
     /// # Returns
@@ -55,6 +55,6 @@ impl TaskRegistration {
 /// The address-derived key used only inside this service's abort-handle map.
 #[must_use]
 #[inline]
-pub(crate) fn key(marker: &Arc<TaskRegistration>) -> usize {
+pub(crate) fn key(marker: &Arc<TokioTaskRegistration>) -> usize {
     Arc::as_ptr(marker) as usize
 }

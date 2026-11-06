@@ -2,7 +2,7 @@
 
 [English](user_guide.md) | [README](../README.zh_CN.md) | [API 文档](https://docs.rs/qubit-tokio-executor)
 
-本文适用于 `qubit-tokio-executor` 0.11，面向已经运行 Tokio 的 Rust 应用开发者。它说明如何在处理可能阻塞的同步任务或异步 future 时，复用 Qubit 的任务结果与服务生命周期抽象。
+本文适用于 `qubit-tokio-executor` 0.12，面向已经运行 Tokio 的 Rust 应用开发者。它说明如何在处理可能阻塞的同步任务或异步 future 时，复用 Qubit 的任务结果与服务生命周期抽象。
 
 ## 概念模型
 
@@ -23,7 +23,7 @@
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.11"
+qubit-tokio-executor = "0.12"
 qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
@@ -80,13 +80,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 后提交返回 `SubmissionError::Saturated`。可使用
 `TokioExecutorService::with_task_capacity` 或
 `TokioIoExecutorService::with_task_capacity` 并传入 `NonZeroUsize` 设置其他
-有限容量。任务完成或底层任务取消并释放后会归还容量；已经开始运行的阻塞
-闭包会一直占用容量直到返回。服务先检查关闭状态，再检查容量；即使容量已满，
-关闭后的提交也返回 `SubmissionError::Shutdown`。
+有限容量。任务完成或服务记账中的任务取消后会归还逻辑容量。排队中的阻塞任务成功取消后，容量会立即归还；但取消结果或服务终止都不保证 Tokio 已销毁排队闭包及其 captures。已经开始运行的阻塞闭包不能被 abort，会一直占用容量直到返回。IO 任务在 Tokio 处理 abort 并销毁受保护的 future 后归还容量。因此容量限制的是逻辑上未完成的任务数量，不是可能仍留在 Tokio 队列中的捕获资源上限。服务先检查关闭状态，再检查容量；即使容量已满，关闭后的提交也返回 `SubmissionError::Shutdown`。
+
+需要在饱和后重试时，必须在**第一次提交尝试之前**调用 `capacity_changes()` 订阅。收到 `SubmissionError::Saturated` 后等待 `changed()` 再试；其他错误应直接返回。通知只是提示，不预留槽位、不保证公平，generation 数值也不代表可用容量。提交方法按值消费任务，即使拒绝也不会把 callable 或 future 还给调用方。重试时可用 `Arc<Mutex<Option<C>>>` 保留 callable：包装闭包真正运行时取出它，释放锁后再调用。不要假设任意 future 可以克隆或安全重复执行。被取消的等待若尚未提交，会丢弃包装任务；提交成功后则按句柄契约处理。
 
 ## 错误与诊断
 
-`SubmissionError::Shutdown` 表示服务不再接收任务。多个调用方协作时，可通过 `is_running`、`is_not_running` 或 `lifecycle` 检查服务状态。两个服务接受任务后，任务本身仍可能返回业务错误；异步任务还可能在最终结果中报告取消或 panic。
+`SubmissionError::Shutdown` 表示服务不再接收任务；`SubmissionError::Saturated` 表示未完成任务容量已满。多个调用方协作时，可通过 `is_running`、`is_not_running` 或 `lifecycle` 检查服务状态。两个服务接受任务后，任务本身仍可能返回业务错误；异步任务还可能在最终结果中报告取消或 panic。
 
 `stop` 会返回 `StopReport`。阻塞服务的 `cancelled` 只统计闭包开始前真正取消成功的排队任务；已经开始的阻塞闭包会继续运行，直至自行返回。IO 服务的 `cancelled` 则统计已经向 Tokio abort handle 发出请求的异步任务数。
 
@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | 现象 | 检查项 | 处理方式 |
 | --- | --- | --- |
-| 提交被拒绝 | 服务可能已经 `shutdown` 或 `stop` | 在服务处于运行状态时提交。 |
+| 提交被拒绝 | `Shutdown` 表示已关闭，`Saturated` 表示容量已满 | 容量已满时，先订阅容量变化，等待通知后重试。 |
 | 异步任务拖慢其他任务 | IO future 中可能执行了阻塞操作 | 将阻塞操作移交给 `TokioExecutorService`。 |
 | 阻塞服务迟迟不终止 | 某个阻塞闭包可能已经开始运行 | 等待闭包返回；Tokio 无法强制中止它。 |
 | 取消后结果并不确定 | 正常完成与取消可能竞争 | 等待返回的句柄，以最终结果为准。 |

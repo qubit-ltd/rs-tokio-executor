@@ -13,7 +13,7 @@ Qubit Tokio Executor 为已经采用 Tokio 的 Rust 应用提供统一的执行�
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.11"
+qubit-tokio-executor = "0.12"
 qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
@@ -47,6 +47,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## 为什么需要这个项目
 
 Tokio 提供了任务调度原语，但 Qubit 应用往往还需要在多个执行域中复用一致的 `ExecutorService` 生命周期和任务结果模型。这个 crate 将这些抽象适配到 Tokio，避免业务代码反复围绕 Tokio 句柄实现任务准入、关闭、结果传递与计数管理。
+
+0.12 版本移除了内部的 `qubit_tokio_executor::testing` 导出。常规执行器和服务
+API 保持不变；内部 helper 测试应放在 crate 自己的私有测试模块中。
 
 ## 核心能力
 

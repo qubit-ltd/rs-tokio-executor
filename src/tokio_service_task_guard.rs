@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
-use crate::tokio_task_registration::TaskRegistration;
+use crate::tokio_task_registration::TokioTaskRegistration;
 
 /// State value for a task accepted but not yet started.
 const TASK_STATE_QUEUED: u8 = 0;
@@ -24,7 +24,7 @@ struct TokioServiceTaskTracker {
     /// Shared service state updated by this tracker.
     state: Arc<TokioExecutorServiceState>,
     /// Service-local marker for removing the tracked abort handle.
-    marker: Arc<TaskRegistration>,
+    marker: Arc<TokioTaskRegistration>,
     /// One-way task accounting state.
     task_state: AtomicU8,
 }
@@ -41,7 +41,7 @@ impl TokioServiceTaskTracker {
     /// # Returns
     ///
     /// A tracker initialized in the queued state.
-    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<TaskRegistration>) -> Self {
+    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<TokioTaskRegistration>) -> Self {
         Self {
             state,
             marker,
@@ -55,7 +55,7 @@ impl TokioServiceTaskTracker {
     ///
     /// The marker used to match a tracked Tokio abort handle.
     #[inline]
-    pub(crate) fn marker(&self) -> &Arc<TaskRegistration> {
+    pub(crate) fn marker(&self) -> &Arc<TokioTaskRegistration> {
         &self.marker
     }
 
@@ -137,7 +137,7 @@ impl TokioServiceTaskGuard {
     /// # Returns
     ///
     /// A lifecycle guard bound to the supplied tracker.
-    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<TaskRegistration>) -> Self {
+    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<TokioTaskRegistration>) -> Self {
         Self {
             tracker: Arc::new(TokioServiceTaskTracker::new(state, marker)),
         }

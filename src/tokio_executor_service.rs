@@ -29,7 +29,7 @@ use crate::TokioBlockingTaskHandle;
 use crate::TokioExecutorServiceStats;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
 use crate::tokio_service_task_guard::TokioServiceTaskGuard;
-use crate::tokio_task_registration::TaskRegistration;
+use crate::tokio_task_registration::TokioTaskRegistration;
 use crate::tokio_task_slot_cancellation::cancel_unstarted_task_slot_if_queued;
 use crate::tokio_task_slot_cancellation::share_task_slot;
 use crate::tokio_task_slot_cancellation::take_task_slot;
@@ -78,22 +78,85 @@ impl TokioExecutorService {
 
     /// Subscribes to changes that may make another blocking task admissible.
     ///
-    /// A notification is only a hint; callers must retry submission because
-    /// another producer may consume the available capacity first.
+    /// Subscribe before the first submission attempt. After a saturated
+    /// attempt, wait for [`tokio::sync::watch::Receiver::changed`] and then
+    /// retry; the notification reserves no slot and gives producers no fairness
+    /// guarantee. Its generation value is not a capacity count.
     ///
     /// # Returns
     ///
     /// A receiver that observes capacity and lifecycle changes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io;
+    /// use std::num::NonZeroUsize;
+    /// use std::sync::{Arc, Mutex};
+    /// use std::sync::mpsc;
+    ///
+    /// use qubit_executor::service::{ExecutorService, SubmissionError};
+    /// use qubit_tokio_executor::TokioExecutorService;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let service = TokioExecutorService::with_task_capacity(
+    ///         tokio::runtime::Handle::current(), NonZeroUsize::new(1).unwrap());
+    ///     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    ///     let (release_tx, release_rx) = mpsc::channel();
+    ///     let started_tx = Mutex::new(Some(started_tx));
+    ///     let blocker = service.submit_callable(move || {
+    ///         started_tx.lock().unwrap().take().unwrap().send(()).unwrap();
+    ///         release_rx.recv().unwrap();
+    ///         Ok::<(), io::Error>(())
+    ///     }).unwrap();
+    ///     started_rx.await.unwrap();
+    ///
+    ///     // Keep ownership until an attempt actually runs. Rejected submission
+    ///     // consumes only its wrapper, while the original callable stays here.
+    ///     let task = Arc::new(Mutex::new(Some(|| Ok::<usize, io::Error>(42))));
+    ///     let mut changes = service.capacity_changes();
+    ///     let mut released = false;
+    ///     let result = loop {
+    ///         let task = Arc::clone(&task);
+    ///         let attempt = service.submit_callable(move || {
+    ///             let callable = task.lock().unwrap().take().unwrap();
+    ///             callable()
+    ///         });
+    ///         match attempt {
+    ///             Ok(handle) => break handle.await.unwrap(),
+    ///             Err(SubmissionError::Saturated) => {
+    ///                 if !released {
+    ///                     release_tx.send(()).unwrap();
+    ///                     released = true;
+    ///                 }
+    ///                 changes.changed().await.unwrap();
+    ///             },
+    ///             Err(error) => panic!("submission rejected: {error}"),
+    ///         }
+    ///     };
+    ///     assert_eq!(result, 42);
+    ///     blocker.await.unwrap();
+    ///     service.shutdown();
+    ///     service.await_termination().await;
+    /// }
     #[must_use]
     pub fn capacity_changes(&self) -> tokio::sync::watch::Receiver<u64> {
         self.state.capacity_changes()
     }
 
-    /// Creates a new service instance.
+    /// Creates a new service instance with the default capacity of 1024
+    /// unfinished tasks.
+    ///
+    /// Use [`Self::with_task_capacity`] to choose another nonzero limit.
     ///
     /// # Returns
     ///
     /// A Tokio-backed executor service.
+    ///
+    /// # Parameters
+    ///
+    /// * `runtime` - Tokio runtime used to execute accepted blocking tasks.
     #[inline]
     pub fn new(runtime: Handle) -> Self {
         Self::with_task_capacity(
@@ -134,7 +197,7 @@ impl TokioExecutorService {
     /// Tasks are submitted to the runtime handle captured by [`Self::new`].
     fn prepare_blocking_submission(
         &self,
-    ) -> Result<(Arc<TaskRegistration>, TokioServiceTaskGuard, MutexGuard<'_, ()>), SubmissionError> {
+    ) -> Result<(Arc<TokioTaskRegistration>, TokioServiceTaskGuard, MutexGuard<'_, ()>), SubmissionError> {
         let admission = self.state.lock_submission();
         if self.state.is_not_running() {
             return Err(SubmissionError::Shutdown);
@@ -142,15 +205,28 @@ impl TokioExecutorService {
         if !self.state.try_accept_task() {
             return Err(SubmissionError::Saturated);
         }
-        let marker = TaskRegistration::new();
+        let marker = TokioTaskRegistration::new();
         let guard = TokioServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
         Ok((marker, guard, admission))
     }
 
     /// Spawns a queued blocking task and registers its abort hook.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - Accepted task body submitted to Tokio.
+    /// * `C` - Hook used to cancel queued service accounting.
+    ///
+    /// # Parameters
+    ///
+    /// * `marker` - Registration marker for the accepted task.
+    /// * `_admission` - Guard that holds submission admission until spawning.
+    /// * `guard` - Lifecycle guard for the accepted task.
+    /// * `task` - Task body to run after the lifecycle guard starts.
+    /// * `cancel` - Queued-cancellation hook registered with the service.
     fn spawn_accepted_blocking_task<F, C>(
         &self,
-        marker: Arc<TaskRegistration>,
+        marker: Arc<TokioTaskRegistration>,
         _admission: MutexGuard<'_, ()>,
         guard: TokioServiceTaskGuard,
         task: F,
@@ -174,12 +250,14 @@ impl TokioExecutorService {
 }
 
 impl ExecutorService for TokioExecutorService {
+    /// Result handle type returned by callable submissions.
     type ResultHandle<R, E>
         = TaskHandle<R, E>
     where
         R: Send + 'static,
         E: Send + 'static;
 
+    /// Tracked handle type returned by tracked callable submissions.
     type TrackedHandle<R, E>
         = TokioBlockingTaskHandle<R, E>
     where
@@ -199,7 +277,13 @@ impl ExecutorService for TokioExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted.
+    /// requested before the task is accepted, or [`SubmissionError::Saturated`]
+    /// if the unfinished-task capacity is full. Shutdown is checked first.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T` - Runnable submitted for execution.
+    /// * `E` - Error type reported by the runnable.
     fn submit<T, E>(&self, task: T) -> Result<(), SubmissionError>
     where
         T: Runnable<E> + Send + 'static,
@@ -234,7 +318,14 @@ impl ExecutorService for TokioExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted.
+    /// requested before the task is accepted, or [`SubmissionError::Saturated`]
+    /// if the unfinished-task capacity is full. Shutdown is checked first.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `C` - Callable submitted for execution.
+    /// * `R` - Value returned by the callable.
+    /// * `E` - Error returned by the callable.
     fn submit_callable<C, R, E>(&self, task: C) -> Result<Self::ResultHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
@@ -274,7 +365,14 @@ impl ExecutorService for TokioExecutorService {
     /// # Errors
     ///
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
-    /// requested before the task is accepted.
+    /// requested before the task is accepted, or [`SubmissionError::Saturated`]
+    /// if the unfinished-task capacity is full. Shutdown is checked first.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `C` - Callable submitted for execution.
+    /// * `R` - Value returned by the callable.
+    /// * `E` - Error returned by the callable.
     fn submit_tracked_callable<C, R, E>(&self, task: C) -> Result<Self::TrackedHandle<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,
@@ -353,6 +451,10 @@ impl ExecutorService for TokioExecutorService {
     }
 
     /// Waits at most `timeout` for the blocking Tokio service to terminate.
+    ///
+    /// # Parameters
+    ///
+    /// * `timeout` - Maximum duration to wait for termination.
     fn wait_termination_timeout(&self, timeout: Duration) -> bool {
         self.state.wait_termination_timeout(timeout)
     }

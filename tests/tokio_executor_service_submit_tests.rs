@@ -16,6 +16,22 @@ use qubit_executor::service::ExecutorService;
 use qubit_executor::service::SubmissionError;
 use qubit_tokio_executor::TokioExecutorService;
 
+struct ReleaseOnDrop(Option<mpsc::Sender<()>>);
+
+impl ReleaseOnDrop {
+    fn release(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 fn ok_unit_task() -> Result<(), io::Error> {
     Ok(())
 }
@@ -176,4 +192,193 @@ fn test_tokio_executor_service_capacity_reuses_slot_after_queued_cancel() {
         service.shutdown();
         service.await_termination().await;
     });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_concurrent_admission_reserves_only_one_slot() {
+    use std::sync::Arc;
+    use std::sync::Barrier;
+    use std::thread;
+
+    let service = TokioExecutorService::with_task_capacity(
+        tokio::runtime::Handle::current(),
+        NonZeroUsize::new(1).expect("capacity should be nonzero"),
+    );
+    let barrier = Arc::new(Barrier::new(3));
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
+    let release_rx = std::sync::Arc::new(std::sync::Mutex::new(Some(release_rx)));
+    let (results_tx, results_rx) = mpsc::channel();
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let service = service.clone();
+        let barrier = Arc::clone(&barrier);
+        let results_tx = results_tx.clone();
+        let release_rx = std::sync::Arc::clone(&release_rx);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            let result = service.submit_callable(move || {
+                release_rx
+                    .lock()
+                    .expect("release lock")
+                    .take()
+                    .expect("accepted task takes release signal")
+                    .recv()
+                    .expect("test must release accepted task");
+                Ok::<(), io::Error>(())
+            });
+            results_tx.send(result).expect("test should collect result");
+        }));
+    }
+    drop(results_tx);
+    barrier.wait();
+    let first = results_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first submit should finish");
+    let second = results_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("second submit should finish");
+    let outcomes = [first, second];
+    assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|result| matches!(result, Err(SubmissionError::Saturated)))
+            .count(),
+        1
+    );
+    assert_eq!((service.stats().queued + service.stats().running), 1);
+    release.release();
+    for worker in workers {
+        worker.join().expect("submitter should exit");
+    }
+    for handle in outcomes.into_iter().flatten() {
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("accepted task should finish in time")
+            .expect("accepted task should succeed");
+    }
+    service.shutdown();
+    tokio::time::timeout(Duration::from_secs(5), service.await_termination())
+        .await
+        .expect("service should terminate in time");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_submission_races_with_shutdown() {
+    run_submission_race_with_close(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_submission_races_with_stop() {
+    run_submission_race_with_close(true).await;
+}
+
+async fn run_submission_race_with_close(stop: bool) {
+    use std::sync::Arc;
+    use std::sync::Barrier;
+    use std::thread;
+
+    let service = TokioExecutorService::with_task_capacity(
+        tokio::runtime::Handle::current(),
+        NonZeroUsize::new(1).expect("capacity should be nonzero"),
+    );
+    let barrier = Arc::new(Barrier::new(3));
+    let (submit_tx, submit_rx) = mpsc::channel();
+    let submit_service = service.clone();
+    let submit_barrier = Arc::clone(&barrier);
+    let submitter = thread::spawn(move || {
+        submit_barrier.wait();
+        submit_tx
+            .send(submit_service.submit_callable(|| Ok::<usize, io::Error>(42)))
+            .expect("test should collect submission");
+    });
+    let (close_done_tx, close_done_rx) = mpsc::channel();
+    let close_service = service.clone();
+    let close_barrier = Arc::clone(&barrier);
+    let closer = thread::spawn(move || {
+        close_barrier.wait();
+        if stop {
+            close_service.stop();
+        } else {
+            close_service.shutdown();
+        }
+        close_done_tx.send(()).expect("test should observe close completion");
+    });
+    barrier.wait();
+    let first = submit_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("submission should finish");
+    close_done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("shutdown or stop should finish in time");
+    submitter.join().expect("submitter should exit");
+    closer.join().expect("closer should exit");
+    assert!(matches!(first, Ok(_) | Err(SubmissionError::Shutdown)));
+    assert!(matches!(
+        service.submit_callable(|| Ok::<(), io::Error>(())),
+        Err(SubmissionError::Shutdown)
+    ));
+    if let Ok(handle) = first {
+        let result = tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("accepted task should finish in time");
+        assert!(result.is_ok() || (stop && matches!(result, Err(TaskExecutionError::Cancelled))));
+    }
+    tokio::time::timeout(Duration::from_secs(5), service.await_termination())
+        .await
+        .expect("service should terminate in time");
+    assert_eq!((service.stats().queued + service.stats().running), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_capacity_change_before_wait_is_observed() {
+    let service = TokioExecutorService::with_task_capacity(
+        tokio::runtime::Handle::current(),
+        NonZeroUsize::new(1).expect("capacity should be nonzero"),
+    );
+    let mut changes = service.capacity_changes();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
+    let started_tx = std::sync::Mutex::new(Some(started_tx));
+    let first = service
+        .submit_callable(move || {
+            started_tx
+                .lock()
+                .expect("start lock")
+                .take()
+                .expect("start signal once")
+                .send(())
+                .expect("test should observe task start");
+            release_rx.recv().expect("test should release task");
+            Ok::<(), io::Error>(())
+        })
+        .expect("service should accept first task");
+    tokio::time::timeout(Duration::from_secs(5), started_rx)
+        .await
+        .expect("task should start in time")
+        .expect("start signal should arrive");
+    assert!(matches!(
+        service.submit_callable(ok_unit_task as fn() -> Result<(), io::Error>),
+        Err(SubmissionError::Saturated)
+    ));
+    release.release();
+    tokio::time::timeout(Duration::from_secs(5), first)
+        .await
+        .expect("first task should finish in time")
+        .expect("first task should succeed");
+    tokio::time::timeout(Duration::from_secs(5), changes.changed())
+        .await
+        .expect("capacity notification should arrive")
+        .expect("service remains alive");
+    service
+        .submit_callable(ok_unit_task as fn() -> Result<(), io::Error>)
+        .expect("released capacity should admit retry")
+        .await
+        .expect("retry should succeed");
+    service.shutdown();
+    tokio::time::timeout(Duration::from_secs(5), service.await_termination())
+        .await
+        .expect("service should terminate in time");
 }
