@@ -81,6 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 需要单独取消排队中的阻塞任务时，使用 `submit_tracked_callable`。`TokioBlockingTaskHandle::cancel` 只有在阻塞闭包尚未开始时才能取消任务。异步任务的 `TokioTaskHandle::cancel` 会向 Tokio 发出 abort 请求；完成与取消可能竞争，最终仍应等待句柄确认结果。
 
+`TokioBlockingTaskHandle::cancellation_handle` 从
+`qubit-tokio-executor` 0.12.0 版本开始提供。在把阻塞句柄消费为 future
+之前保存此端点，等待过程中就可以通过它请求取消。端点及其克隆共享同一取消路径；丢弃端点不会取消任务。阻塞闭包开始后仍无法被 Tokio 强制中断。0.12.0 之前的版本没有此端点；这些版本应在等待句柄前调用 `handle.cancel()`。
+
 两个服务默认各自最多接收 1024 个尚未完成的任务。阻塞服务统计排队和
 运行中的任务；IO 服务还统计 Tokio 已接收但尚未 poll 的 future。达到容量
 后提交返回 `SubmissionError::Saturated`。可使用
@@ -296,7 +300,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `timeout` 只结束这次等待；因为传入的是 `&mut handle`，句柄仍在手中，可以继续请求取消并确认最终结果。直接丢弃 `TokioTaskHandle` 会让 Tokio 任务脱离当前观察者，不会取消任务；丢弃等待 future 也不会发出取消请求。`shutdown` 只关闭准入并让已接收任务继续执行；`stop` 还会请求取消，仍可能与正常完成竞争。最终应以等待句柄所得结果为准。
 
-阻塞句柄的 `IntoFuture` 会消费句柄，因此 `handle.await` 一旦开始，不能像 IO 句柄那样再复用它。若要取消尚在队列中的任务，应先调用 `handle.cancel()`，再消费句柄等待结果；也可使用服务级终止等待。丢弃 `TokioBlockingTaskHandle` 或它的等待 future 不会停止闭包。显式取消与服务 `stop` 只能尝试取消尚未开始的任务；已经运行的阻塞闭包会继续执行到返回。两类句柄一旦丢弃，调用方也就放弃了通过该句柄观察最终结果的途径。
+阻塞句柄的 `IntoFuture` 会消费句柄，因此 `handle.await` 一旦开始，不能像 IO 句柄那样再复用它。0.12.0 及之后的版本可以在消费句柄前保存取消端点，以便等待期间请求取消；更早版本应在消费句柄前调用 `handle.cancel()`。也可使用服务级终止等待。丢弃 `TokioBlockingTaskHandle` 或它的等待 future 不会停止闭包。显式取消与服务 `stop` 只能尝试取消尚未开始的任务；已经运行的阻塞闭包会继续执行到返回。两类句柄一旦丢弃，调用方也就放弃了通过该句柄观察最终结果的途径。
 
 ## 错误与诊断
 

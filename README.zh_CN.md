@@ -65,6 +65,10 @@ API 保持不变；内部 helper 测试应放在 crate 自己的私有测试模�
 - `TokioBlockingTaskHandle`：跟踪阻塞任务，并可在闭包开始前请求取消；
   `TokioTaskHandle`：等待异步任务结果，并支持尽力而为的 abort 请求。
 
+从 `qubit-tokio-executor` 0.12.0 开始，阻塞任务的
+`cancellation_handle()` 在结果句柄消费为 future 后仍可使用。更早版本须在
+await 句柄前调用 `cancel()`。取消端点无法中断已经开始运行的阻塞闭包。
+
 同步任务可能占用 OS 线程时应选择阻塞服务；非阻塞 future 则使用 IO 服务。不要在 IO future 中执行长时间阻塞操作。`shutdown` 会拒绝后续提交，并允许已接受任务继续完成；需要等待服务终止时，另行调用 `await_termination().await`。阻塞服务也支持同步等待方法。`stop` 还会请求取消。阻塞闭包一旦开始执行，Tokio 无法强制终止；异步任务的取消请求也可能与正常完成竞争。丢弃句柄只会放弃结果观察入口，不会取消已接收任务。双语指南链接了容量重试的 [Callable](examples/capacity_retry_callable.rs) 和 [future](examples/capacity_retry_future.rs) 完整程序。
 
 ## 延伸阅读

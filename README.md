@@ -79,6 +79,11 @@ live inside the crate's private test modules.
   before its closure starts, and `TokioTaskHandle` for async results and
   best-effort abort requests.
 
+In `qubit-tokio-executor` 0.12.0 and later, a blocking task's
+`cancellation_handle()` remains usable after its result handle is consumed into
+a future. Earlier releases require calling `cancel()` before awaiting the
+handle. A cancellation endpoint cannot interrupt a closure that has started.
+
 Choose the blocking service for synchronous work that can occupy an OS thread;
 choose the IO service for non-blocking futures. Do not run long blocking work
 inside an IO future. `shutdown` rejects new tasks and lets accepted work finish;

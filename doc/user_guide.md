@@ -115,6 +115,14 @@ cancelled. `TokioBlockingTaskHandle::cancel` can cancel only before the blocking
 closure starts. `TokioTaskHandle::cancel` sends Tokio an abort request; await
 the handle to observe whether cancellation or completion won the race.
 
+`TokioBlockingTaskHandle::cancellation_handle` is available in
+`qubit-tokio-executor` 0.12.0 and later. Save this endpoint before consuming
+the task handle into its future when cancellation may be needed during the
+wait. The endpoint and its clones share the task's cancellation path; dropping
+an endpoint does not cancel the task. Tokio still cannot interrupt a blocking
+closure after it starts. Releases before 0.12.0 do not expose this endpoint;
+call `handle.cancel()` before awaiting the handle in those versions.
+
 Each service accepts at most 1024 unfinished tasks by default. The blocking
 service counts queued and running tasks; the IO service also counts accepted
 futures that Tokio has not polled yet. At capacity, submission returns
@@ -356,9 +364,11 @@ closes admission and lets accepted work finish; `stop` also requests task
 cancellation, which may race with completion. The awaited result is authoritative.
 
 The blocking handle differs: its `IntoFuture` implementation consumes the
-handle, so `handle.await` cannot be wrapped in a timeout and then reused. Call
-`handle.cancel()` before consuming it if queued cancellation is desired, or use
-service-level termination waits. Dropping `TokioBlockingTaskHandle` or its wait
+handle, so `handle.await` cannot be wrapped in a timeout and then reused. In
+version 0.12.0 and later, retain a cancellation endpoint before consuming it
+if queued cancellation may be needed while waiting; in earlier versions, call
+`handle.cancel()` before consuming it. Service-level termination waits are
+also available. Dropping `TokioBlockingTaskHandle` or its wait
 future does not stop a closure; explicit cancellation and service `stop` can
 cancel queued work only. Started blocking closures always run until they
 return. Dropping either kind of handle also means the caller gives up that

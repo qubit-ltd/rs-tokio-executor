@@ -6,19 +6,21 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::future::IntoFuture;
+use std::sync::Arc;
 
 use qubit_executor::CancelResult;
 use qubit_executor::TaskResult;
 use qubit_executor::TaskStatus;
 use qubit_executor::TrackedTask;
 use qubit_executor::TryGet;
+use qubit_executor::task::TaskCancellationHandle;
 use qubit_executor::task::TaskHandleFuture;
 use qubit_executor::task::spi::TaskResultHandle;
 use qubit_executor::task::spi::TrackedTaskHandle;
 use tokio::task::AbortHandle;
 
 /// Callback used to finish service-side queued-task accounting.
-type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
+type CancelQueuedTask = Arc<dyn Fn() + Send + Sync + 'static>;
 
 /// Tracked handle for tasks submitted to Tokio's blocking task pool.
 ///
@@ -100,14 +102,18 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// * `F` - Callback type used to finish queued-task accounting.
     #[must_use]
     #[inline]
-    pub(crate) fn new<F>(handle: TrackedTask<R, E>, abort_handle: AbortHandle, cancel_queued_task: F) -> Self
+    pub(crate) fn new<F>(
+        handle: TrackedTask<R, E>,
+        abort_handle: AbortHandle,
+        cancel_queued_task: F,
+    ) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
         Self {
             handle,
             abort_handle,
-            cancel_queued_task: Box::new(cancel_queued_task),
+            cancel_queued_task: Arc::new(cancel_queued_task),
         }
     }
 
@@ -182,13 +188,55 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     #[must_use]
     #[inline]
     pub fn cancel(&self) -> CancelResult {
-        let result = self.handle.cancel();
-        if result == CancelResult::Cancelled {
-            (self.cancel_queued_task)();
-            self.abort_handle.abort();
-        }
-        result
+        cancel_blocking_task(
+            || self.handle.cancel(),
+            &self.cancel_queued_task,
+            &self.abort_handle,
+        )
     }
+
+    /// Returns a cancellation endpoint that remains usable after this handle
+    /// is consumed into a future.
+    ///
+    /// Cloning or dropping the endpoint does not cancel the task. Only the
+    /// endpoint that wins cancellation completes queued-task accounting and
+    /// requests Tokio to abort the queued closure. Tokio performs closure
+    /// destruction asynchronously. A blocking closure that has started cannot
+    /// be forcibly interrupted.
+    ///
+    /// Panics from the queued-task accounting callback propagate to the
+    /// caller and prevent the subsequent Tokio abort request, matching
+    /// [`Self::cancel`].
+    #[must_use]
+    #[inline]
+    pub fn cancellation_handle(&self) -> TaskCancellationHandle
+    where
+        R: Send + 'static,
+        E: Send + 'static,
+    {
+        let cancellation = self.handle.cancellation_handle();
+        let cancel_queued_task = Arc::clone(&self.cancel_queued_task);
+        let abort_handle = self.abort_handle.clone();
+        TaskCancellationHandle::new(move || {
+            cancel_blocking_task(|| cancellation.cancel(), &cancel_queued_task, &abort_handle)
+        })
+    }
+}
+
+/// Completes the provider-specific part of cancellation when the task state
+/// accepts the cancellation request. Keep callback-before-abort ordering to
+/// preserve the existing panic and accounting semantics.
+fn cancel_blocking_task(
+    cancel: impl FnOnce() -> CancelResult,
+    cancel_queued_task: &CancelQueuedTask,
+    abort_handle: &AbortHandle,
+) -> CancelResult {
+    let result = cancel();
+    if result == CancelResult::Cancelled {
+        (cancel_queued_task)();
+        abort_handle.abort();
+    }
+    result
 }
 
 impl<R, E> TaskResultHandle<R, E> for TokioBlockingTaskHandle<R, E>
@@ -253,9 +301,9 @@ impl<R, E> IntoFuture for TokioBlockingTaskHandle<R, E> {
 
     /// Converts this tracked handle into a future resolving to the task result.
     ///
-    /// This consumes the handle. To call [`Self::cancel`] after starting a
-    /// wait, cancel first and then await the handle; unlike the IO handle, this
-    /// blocking handle cannot be borrowed for an async timeout while retained.
+    /// This consumes the handle. Save [`Self::cancellation_handle`] first if
+    /// cancellation may be needed after the wait starts; unlike the IO handle,
+    /// this blocking handle cannot be borrowed while waiting.
     #[inline]
     fn into_future(self) -> Self::IntoFuture {
         self.handle.into_future()
