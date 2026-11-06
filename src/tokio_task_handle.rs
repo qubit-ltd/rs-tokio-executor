@@ -21,10 +21,42 @@ use tokio::task::JoinHandle;
 /// Awaiting this handle reports the accepted task's final result, including
 /// task failure, panic, or cancellation.
 ///
+/// Calling [`cancel`](Self::cancel) requests cancellation on a best-effort
+/// basis. The task may finish normally before Tokio processes the request, so
+/// await the handle to observe its final result.
+///
 /// # Type Parameters
 ///
 /// * `R` - The task success value.
 /// * `E` - The task error value.
+///
+/// # Examples
+///
+/// This example uses a pending future so cancellation wins deterministically.
+/// For other tasks, completion may race with the cancellation request; await
+/// the handle to observe the final result.
+///
+/// ```
+/// use std::future;
+/// use std::io;
+///
+/// use qubit_executor::CancelResult;
+/// use qubit_executor::TaskExecutionError;
+/// use qubit_tokio_executor::TokioIoExecutorService;
+///
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+///     runtime.block_on(async {
+///         let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+///         let handle = service.spawn(future::pending::<Result<(), io::Error>>())?;
+///         assert_eq!(handle.cancel(), CancelResult::Cancelled);
+///         assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
+///         service.shutdown();
+///         service.await_termination().await;
+///         Ok::<(), Box<dyn std::error::Error>>(())
+///     })
+/// }
+/// ```
 pub struct TokioTaskHandle<R, E> {
     /// Tokio task whose output is the accepted task's final result.
     handle: JoinHandle<TaskResult<R, E>>,

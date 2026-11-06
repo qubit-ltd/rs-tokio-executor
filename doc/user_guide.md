@@ -26,9 +26,9 @@ the service accepted the work; await its returned handle to learn its result.
 
 Suppose an HTTP application must parse a CPU-heavy document while continuing to
 serve asynchronous requests. Its success criterion is a parsed value, followed
-by a clean shutdown that waits for accepted work rather than silently dropping
-it. The blocking service is the appropriate boundary because the parser can
-occupy an OS thread.
+by shutdown and an explicit wait for service termination so accepted work can
+finish rather than being silently dropped. The blocking service is the
+appropriate boundary because the parser can occupy an OS thread.
 
 ## Installation and Minimal Configuration
 
