@@ -81,6 +81,10 @@ choose the IO service for non-blocking futures. Do not run long blocking work
 inside an IO future. `shutdown` rejects new tasks and lets accepted work finish;
 `stop` also requests cancellation. Tokio cannot forcibly stop a blocking closure
 after it starts, and an async cancellation request can race with completion.
+Dropping a handle gives up that observation endpoint but does not cancel
+accepted work. The guides link complete [callable](examples/capacity_retry_callable.rs)
+and [future](examples/capacity_retry_future.rs) examples for retaining a task
+across capacity-based retries.
 
 ## Learn More
 

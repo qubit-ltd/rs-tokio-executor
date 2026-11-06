@@ -21,6 +21,14 @@ use tokio::task::JoinHandle;
 /// Awaiting this handle reports the accepted task's final result, including
 /// task failure, panic, or cancellation.
 ///
+/// Dropping the handle detaches the Tokio task; it does not send an abort
+/// request. Dropping a future that is borrowing this handle only stops that
+/// wait. Call [`cancel`](Self::cancel) to request task cancellation, then await
+/// the handle to observe the final result. A service `shutdown` rejects new
+/// submissions and lets accepted tasks finish; service `stop` requests
+/// cancellation of tracked tasks. Cancellation remains best-effort and may
+/// race with normal completion.
+///
 /// Calling [`cancel`](Self::cancel) requests cancellation on a best-effort
 /// basis. The task may finish normally before Tokio processes the request, so
 /// await the handle to observe its final result.

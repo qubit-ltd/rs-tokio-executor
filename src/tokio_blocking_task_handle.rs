@@ -39,6 +39,14 @@ type CancelQueuedTask = Box<dyn Fn() + Send + Sync + 'static>;
 /// * `R` - The task's successful result type.
 /// * `E` - The task's error type.
 ///
+/// Dropping this handle drops the observation endpoint; it does not cancel the
+/// blocking closure. Dropping a wait future created from the handle also does
+/// not cancel it. Call [`Self::cancel`] to cancel a task that is still queued,
+/// or use service `stop` to request cancellation of queued tasks. Neither
+/// action can stop a closure that has started. Service `shutdown` only closes
+/// admission and lets accepted work finish. The task result remains available
+/// only while an observation handle is retained.
+///
 /// # Examples
 ///
 /// ```
@@ -244,6 +252,10 @@ impl<R, E> IntoFuture for TokioBlockingTaskHandle<R, E> {
     type IntoFuture = TaskHandleFuture<R, E>;
 
     /// Converts this tracked handle into a future resolving to the task result.
+    ///
+    /// This consumes the handle. To call [`Self::cancel`] after starting a
+    /// wait, cancel first and then await the handle; unlike the IO handle, this
+    /// blocking handle cannot be borrowed for an async timeout while retained.
     #[inline]
     fn into_future(self) -> Self::IntoFuture {
         self.handle.into_future()
