@@ -9,13 +9,13 @@ use std::future::Future;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_executor::service::StopReport;
 use qubit_executor::service::SubmissionError;
 
 use crate::TokioIoExecutorServiceStats;
 use crate::TokioTaskHandle;
+use crate::internal::tokio_guarded_io_future::TokioGuardedIoFuture;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
 use crate::tokio_task_registration::TokioTaskRegistration;
@@ -150,10 +150,7 @@ impl TokioIoExecutorService {
         let marker = TokioTaskRegistration::new();
         let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
 
-        let handle = self.runtime.spawn(async move {
-            let _guard = guard;
-            future.await.map_err(TaskExecutionError::Failed)
-        });
+        let handle = self.runtime.spawn(TokioGuardedIoFuture::new(future, guard));
         self.state.register_abort_handle(marker, handle.abort_handle());
         drop(admission);
         Ok(TokioTaskHandle::new(handle))

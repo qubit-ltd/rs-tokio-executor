@@ -10,6 +10,7 @@
 //! Tokio-backed executor and executor service implementations.
 
 mod executor_service_lifecycle_bits;
+mod internal;
 mod tokio_blocking_task_handle;
 mod tokio_executor;
 mod tokio_executor_service;

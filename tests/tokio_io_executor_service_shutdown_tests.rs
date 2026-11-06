@@ -5,12 +5,106 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::future::Future;
 use std::io;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
+use std::sync::mpsc;
+use std::task::Context;
+use std::task::Poll;
 use std::time::Duration;
 
 use qubit_executor::SubmissionError;
 use qubit_executor::TaskExecutionError;
+use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_tokio_executor::TokioIoExecutorService;
+
+struct DropProbe {
+    polled: mpsc::Sender<()>,
+    entered: mpsc::Sender<()>,
+    drop_gate: Arc<TestGate>,
+}
+
+impl Future for DropProbe {
+    type Output = Result<(), io::Error>;
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let _ = self.polled.send(());
+        Poll::Pending
+    }
+}
+
+impl Drop for DropProbe {
+    fn drop(&mut self) {
+        let _ = self.entered.send(());
+        // The test thread releases this after observing service accounting.
+        self.drop_gate.wait();
+    }
+}
+
+struct TestGate {
+    open: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl TestGate {
+    fn new() -> Self {
+        Self {
+            open: Mutex::new(false),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn wait(&self) {
+        let open = self.open.lock().expect("gate mutex should not be poisoned");
+        let (open, result) = self
+            .changed
+            .wait_timeout_while(open, Duration::from_secs(5), |open| !*open)
+            .expect("gate mutex should not be poisoned");
+        assert!(*open || !result.timed_out(), "test gate should be released");
+    }
+
+    fn release(&self) {
+        *self.open.lock().expect("gate mutex should not be poisoned") = true;
+        self.changed.notify_all();
+    }
+}
+
+struct DropGateRelease(Arc<TestGate>);
+
+impl DropGateRelease {
+    fn release(&mut self) {
+        self.0.release();
+    }
+}
+
+impl Drop for DropGateRelease {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+fn drop_probe(gate: Arc<TestGate>) -> (DropProbe, mpsc::Receiver<()>, mpsc::Receiver<()>) {
+    let (polled_tx, polled_rx) = mpsc::channel();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    (
+        DropProbe {
+            polled: polled_tx,
+            entered: entered_tx,
+            drop_gate: gate,
+        },
+        polled_rx,
+        entered_rx,
+    )
+}
+
+fn receive_signal(receiver: mpsc::Receiver<()>, message: &'static str) {
+    receiver
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap_or_else(|_| panic!("{message}"));
+}
 
 #[tokio::test]
 async fn test_tokio_io_executor_service_shutdown_rejects_new_tasks() {
@@ -156,5 +250,103 @@ async fn test_tokio_io_executor_service_completion_keeps_waiting_for_remaining_t
     assert!(!service.is_terminated());
     release_tx.send(()).expect("pending task should receive release signal");
     pending_handle.await.expect("pending task should complete successfully");
+    assert!(service.is_terminated());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_tokio_io_executor_service_stop_drops_pending_future_before_termination() {
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+    let gate = Arc::new(TestGate::new());
+    let mut release = DropGateRelease(Arc::clone(&gate));
+    let (probe, polled, entered) = drop_probe(gate);
+    let handle = service.spawn(probe).expect("service should accept probe");
+
+    receive_signal(polled, "probe should be polled before cancellation");
+    service.shutdown();
+    assert!(service.is_shutting_down());
+    let report = service.stop();
+    assert_eq!(report.running, 1);
+    assert_eq!(report.cancelled, 1);
+    receive_signal(entered, "probe destructor should enter after cancellation");
+
+    // The destructor is known to be blocked here, so this is an ordering
+    // observation rather than a timing-based guess.
+    assert_eq!(service.stats().accepted_unfinished, 1);
+    assert!(!service.is_terminated());
+    assert!(service.is_stopping());
+
+    release.release();
+    assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
+    assert_eq!(service.stats().accepted_unfinished, 0);
+    assert!(service.is_terminated());
+}
+
+#[tokio::test]
+async fn test_tokio_io_executor_service_guarded_future_preserves_panic_result() {
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+    let handle = service
+        .spawn(async {
+            panic!("probe panic should be reported by the task handle");
+            #[allow(unreachable_code)]
+            Ok::<(), io::Error>(())
+        })
+        .expect("service should accept task");
+
+    assert!(matches!(handle.await, Err(TaskExecutionError::Panicked)));
+    service.shutdown();
+    assert_eq!(service.stats().accepted_unfinished, 0);
+    assert!(service.is_terminated());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_tokio_io_executor_service_cancel_drops_unpolled_future_before_termination() {
+    let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+    let blocker_gate = Arc::new(TestGate::new());
+    let mut release_blocker = DropGateRelease(Arc::clone(&blocker_gate));
+    let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
+    let mut blockers = Vec::new();
+    for _ in 0..2 {
+        let started = blocker_started_tx.clone();
+        let worker_gate = Arc::clone(&blocker_gate);
+        blockers.push(tokio::spawn(async move {
+            let _ = started.send(());
+            worker_gate.wait();
+        }));
+    }
+    drop(blocker_started_tx);
+    for _ in 0..2 {
+        blocker_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("both blockers should occupy the runtime workers");
+    }
+
+    // Both workers are blocked, so the submitted task cannot be polled before
+    // service.stop() requests cancellation.
+    let drop_gate = Arc::new(TestGate::new());
+    let mut release_drop = DropGateRelease(Arc::clone(&drop_gate));
+    let (probe, polled, entered) = drop_probe(drop_gate);
+    let handle = service.spawn(probe).expect("service should accept probe");
+    assert_eq!(service.stats().accepted_unfinished, 1);
+    assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Running);
+    let report = service.stop();
+    assert_eq!(report.running, 1);
+    assert_eq!(report.cancelled, 1);
+    assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Stopping);
+    service.shutdown();
+    assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Stopping);
+
+    release_blocker.release();
+    receive_signal(entered, "unpolled probe destructor should enter");
+    assert_eq!(service.stats().accepted_unfinished, 1);
+    assert!(!service.is_terminated());
+    assert!(service.is_stopping());
+
+    release_drop.release();
+    assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
+    assert!(polled.try_recv().is_err(), "cancelled probe must remain unpolled");
+    for blocker in blockers {
+        blocker.await.expect("worker blocker should finish");
+    }
+    assert_eq!(service.stats().accepted_unfinished, 0);
     assert!(service.is_terminated());
 }
