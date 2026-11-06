@@ -16,7 +16,7 @@ executor abstractions.
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.11"
+qubit-tokio-executor = "0.12"
 qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
@@ -59,6 +59,10 @@ Tokio provides scheduling primitives, while Qubit applications may also need a
 common `ExecutorService` lifecycle and task-result model across execution
 domains. This crate adapts those abstractions to Tokio instead of requiring each
 caller to reproduce task admission, shutdown, result handling, and accounting.
+
+Version 0.12 removes the internal `qubit_tokio_executor::testing` exports.
+Normal executor and service APIs are unchanged; internal helper tests should
+live inside the crate's private test modules.
 
 ## What It Provides
 

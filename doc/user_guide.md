@@ -2,7 +2,7 @@
 
 [中文](user_guide.zh_CN.md) | [README](../README.md) | [API documentation](https://docs.rs/qubit-tokio-executor)
 
-Applies to `qubit-tokio-executor` 0.11. This guide is for Rust application
+Applies to `qubit-tokio-executor` 0.12. This guide is for Rust application
 authors who already run Tokio and want Qubit's task-result and service-lifecycle
 abstractions for blocking callables or asynchronous futures.
 
@@ -26,15 +26,15 @@ the service accepted the work; await its returned handle to learn its result.
 
 Suppose an HTTP application must parse a CPU-heavy document while continuing to
 serve asynchronous requests. Its success criterion is a parsed value, followed
-by a clean shutdown that waits for accepted work rather than silently dropping
-it. The blocking service is the appropriate boundary because the parser can
-occupy an OS thread.
+by shutdown and an explicit wait for service termination so accepted work can
+finish rather than being silently dropped. The blocking service is the
+appropriate boundary because the parser can occupy an OS thread.
 
 ## Installation and Minimal Configuration
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.11"
+qubit-tokio-executor = "0.12"
 qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
@@ -100,14 +100,32 @@ service counts queued and running tasks; the IO service also counts accepted
 futures that Tokio has not polled yet. At capacity, submission returns
 `SubmissionError::Saturated`. Use `TokioExecutorService::with_task_capacity` or
 `TokioIoExecutorService::with_task_capacity` with a `NonZeroUsize` to choose a
-different finite limit. Completion and cancellation release capacity when the
-underlying task is dropped. A blocking closure that has started keeps its slot
-until it returns. Shutdown is checked before capacity, so submissions after
+different finite limit. Completion releases capacity when the service accounting
+finishes the task. For a queued blocking task, successful
+cancellation immediately returns logical capacity, but neither cancellation
+nor service termination guarantees Tokio has destroyed the queued closure and
+its captures. A started blocking closure cannot be aborted and keeps its slot
+until it returns. For IO tasks, capacity returns after Tokio processes abort and
+drops the guarded future. The limit bounds logically unfinished tasks, not
+captured resources that may remain in Tokio's blocking queue. Shutdown is checked before capacity, so submissions after
 shutdown return `SubmissionError::Shutdown` even while all slots are occupied.
+
+For retry after saturation, subscribe with `capacity_changes()` **before the
+first submission attempt**. After `SubmissionError::Saturated`, wait for
+`changed()` and retry; return other errors. The notification is only a hint:
+it reserves no slot, promises no fairness, and its generation is not a count of
+available capacity. Submission consumes its task by value even when rejected,
+so the original callable or future is not returned. A retry must retain the
+callable in an ownership slot such as `Arc<Mutex<Option<C>>>`; a wrapper closure
+takes it when run, releases the mutex, and only then calls it. Do not assume an
+arbitrary future can be cloned or safely run twice. Cancelling the wait before
+acceptance drops the unsubmitted wrapper/task; after acceptance, use its handle
+according to the task-handle contract.
 
 ## Errors and Diagnostics
 
-`SubmissionError::Shutdown` means a service no longer accepts work. Check
+`SubmissionError::Shutdown` means a service no longer accepts work;
+`SubmissionError::Saturated` means its unfinished-task capacity is full. Check
 `is_running`, `is_not_running`, or `lifecycle` when coordinating callers. An
 accepted task can still return its own error, and an async task can report a
 cancellation or panic through its final task result.
@@ -121,7 +139,7 @@ async tasks whose Tokio abort handle was signalled.
 
 | Symptom | Check | Resolution |
 | --- | --- | --- |
-| Submission is rejected | The service may have been shut down or stopped | Submit while the service is running. |
+| Submission is rejected | The service may be shut down (`Shutdown`) or at capacity (`Saturated`) | For saturation, subscribe before submitting, wait for a change, then retry. |
 | Async work stalls other tasks | A blocking operation may be inside an IO future | Move that operation to `TokioExecutorService`. |
 | Blocking service does not terminate | A blocking closure may already be running | Let the closure return; Tokio cannot forcibly abort it. |
 | Cancellation did not determine the final result | Completion and cancellation can race | Await the returned handle. |

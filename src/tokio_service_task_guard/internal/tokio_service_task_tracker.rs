@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
-use crate::tokio_task_registration::TaskRegistration;
+use crate::tokio_task_registration::TokioTaskRegistration;
 
 /// State value for a task accepted but not yet started.
 const TASK_STATE_QUEUED: u8 = 0;
@@ -20,11 +20,11 @@ const TASK_STATE_RUNNING: u8 = 1;
 const TASK_STATE_FINISHED: u8 = 2;
 
 /// Shared service-side accounting tracker for one blocking Tokio task.
-pub(super) struct TokioServiceTaskTracker {
+pub(in crate::tokio_service_task_guard) struct TokioServiceTaskTracker {
     /// Shared service state updated by this tracker.
-    state: Arc<TokioExecutorServiceState>,
+    pub(in crate::tokio_service_task_guard) state: Arc<TokioExecutorServiceState>,
     /// Service-local marker for removing the tracked abort handle.
-    marker: Arc<TaskRegistration>,
+    marker: Arc<TokioTaskRegistration>,
     /// One-way task accounting state.
     task_state: AtomicU8,
 }
@@ -41,7 +41,10 @@ impl TokioServiceTaskTracker {
     /// # Returns
     ///
     /// A tracker initialized in the queued state.
-    pub(super) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<TaskRegistration>) -> Self {
+    pub(in crate::tokio_service_task_guard) fn new(
+        state: Arc<TokioExecutorServiceState>,
+        marker: Arc<TokioTaskRegistration>,
+    ) -> Self {
         Self {
             state,
             marker,
@@ -56,7 +59,7 @@ impl TokioServiceTaskTracker {
     /// The marker used to match a tracked Tokio abort handle.
     #[must_use]
     #[inline]
-    pub(super) fn marker(&self) -> &Arc<TaskRegistration> {
+    pub(in crate::tokio_service_task_guard) fn marker(&self) -> &Arc<TokioTaskRegistration> {
         &self.marker
     }
 
@@ -65,7 +68,7 @@ impl TokioServiceTaskTracker {
     /// # Returns
     ///
     /// `true` if the task may run, or `false` if it was cancelled while queued.
-    pub(super) fn mark_started(&self) -> bool {
+    pub(in crate::tokio_service_task_guard) fn mark_started(&self) -> bool {
         match self.task_state.compare_exchange(
             TASK_STATE_QUEUED,
             TASK_STATE_RUNNING,
@@ -86,7 +89,7 @@ impl TokioServiceTaskTracker {
     /// # Returns
     ///
     /// `true` if queued-task accounting was completed by this call.
-    pub(super) fn finish_queued(&self) -> bool {
+    pub(in crate::tokio_service_task_guard) fn finish_queued(&self) -> bool {
         match self.task_state.compare_exchange(
             TASK_STATE_QUEUED,
             TASK_STATE_FINISHED,
@@ -106,13 +109,13 @@ impl TokioServiceTaskTracker {
     /// # Returns
     ///
     /// `true` if queued-task accounting was completed by this call.
-    pub(super) fn cancel_queued(&self) -> bool {
+    pub(in crate::tokio_service_task_guard) fn cancel_queued(&self) -> bool {
         self.state.remove_abort_handle(&self.marker);
         self.finish_queued()
     }
 
     /// Finishes this task from its current accounting state.
-    pub(super) fn finish(&self) {
+    pub(in crate::tokio_service_task_guard) fn finish(&self) {
         match self.task_state.swap(TASK_STATE_FINISHED, Ordering::AcqRel) {
             TASK_STATE_QUEUED => self.state.finish_task(false),
             TASK_STATE_RUNNING => self.state.finish_task(true),

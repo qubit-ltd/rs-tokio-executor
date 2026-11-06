@@ -12,9 +12,20 @@ use std::sync::atomic::Ordering;
 use qubit_executor::TaskExecutionError;
 use qubit_executor::task::spi::TaskEndpointPair;
 use qubit_executor::task::spi::TaskRunner;
-use qubit_tokio_executor::testing::cancel_unstarted_task_slot_if_queued;
-use qubit_tokio_executor::testing::share_task_slot;
-use qubit_tokio_executor::testing::take_task_slot;
+
+use crate::tokio_task_slot_cancellation::cancel_unstarted_task_slot_if_queued;
+use crate::tokio_task_slot_cancellation::share_task_slot;
+use crate::tokio_task_slot_cancellation::take_task_slot;
+
+#[test]
+fn test_share_and_take_task_slot_is_one_shot() {
+    let (_handle, slot) = TaskEndpointPair::<usize, io::Error>::new().into_parts();
+    slot.accept();
+    let shared_slot = share_task_slot(slot);
+
+    assert!(take_task_slot(&shared_slot).is_some());
+    assert!(take_task_slot(&shared_slot).is_none());
+}
 
 /// Verifies queued cancellation does not steal a slot whose service accounting
 /// has already moved to running.

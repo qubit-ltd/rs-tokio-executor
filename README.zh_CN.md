@@ -13,7 +13,7 @@ Qubit Tokio Executor 为已经采用 Tokio 的 Rust 应用提供统一的执行�
 
 ```toml
 [dependencies]
-qubit-tokio-executor = "0.11"
+qubit-tokio-executor = "0.12"
 qubit-executor = "0.9"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 ```
@@ -48,6 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Tokio 提供了任务调度原语，但 Qubit 应用往往还需要在多个执行域中复用一致的 `ExecutorService` 生命周期和任务结果模型。这个 crate 将这些抽象适配到 Tokio，避免业务代码反复围绕 Tokio 句柄实现任务准入、关闭、结果传递与计数管理。
 
+0.12 版本移除了内部的 `qubit_tokio_executor::testing` 导出。常规执行器和服务
+API 保持不变；内部 helper 测试应放在 crate 自己的私有测试模块中。
+
 ## 核心能力
 
 - `TokioExecutor`：通过 Tokio blocking pool 执行同步 callable 的策略级执行器。
@@ -58,7 +61,7 @@ Tokio 提供了任务调度原语，但 Qubit 应用往往还需要在多个执�
 - `TokioBlockingTaskHandle`：跟踪阻塞任务，并可在闭包开始前请求取消；
   `TokioTaskHandle`：等待异步任务结果，并支持尽力而为的 abort 请求。
 
-同步任务可能占用 OS 线程时应选择阻塞服务；非阻塞 future 则使用 IO 服务。不要在 IO future 中执行长时间阻塞操作。`shutdown` 会拒绝后续提交并等待已接受任务完成；`stop` 还会请求取消。阻塞闭包一旦开始执行，Tokio 无法强制终止；异步任务的取消请求也可能与正常完成竞争。
+同步任务可能占用 OS 线程时应选择阻塞服务；非阻塞 future 则使用 IO 服务。不要在 IO future 中执行长时间阻塞操作。`shutdown` 会拒绝后续提交，并允许已接受任务继续完成；需要等待服务终止时，另行调用 `await_termination().await`。阻塞服务也支持同步等待方法。`stop` 还会请求取消。阻塞闭包一旦开始执行，Tokio 无法强制终止；异步任务的取消请求也可能与正常完成竞争。
 
 ## 延伸阅读
 

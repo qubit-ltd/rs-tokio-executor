@@ -6,11 +6,9 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
-use std::sync::atomic::Ordering;
 
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
-use crate::tokio_task_registration::TaskRegistration;
+use crate::tokio_task_registration::TokioTaskRegistration;
 
 mod internal;
 
@@ -33,7 +31,7 @@ impl TokioServiceTaskGuard {
     /// # Returns
     ///
     /// A lifecycle guard bound to the supplied tracker.
-    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<TaskRegistration>) -> Self {
+    pub(crate) fn new(state: Arc<TokioExecutorServiceState>, marker: Arc<TokioTaskRegistration>) -> Self {
         Self {
             tracker: Arc::new(TokioServiceTaskTracker::new(state, marker)),
         }

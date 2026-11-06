@@ -10,6 +10,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use qubit_executor::service::ExecutorService;
+use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_tokio_executor::TokioExecutorService;
 
 #[tokio::test]
@@ -25,25 +26,15 @@ async fn test_tokio_executor_service_state_tracks_shutdown_and_active_tasks() {
         })
         .expect("service should accept blocking task");
 
-    started_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("blocking task should start");
+    started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Running);
     service.shutdown();
-    assert!(
-        service.is_not_running(),
-        "service should stop accepting tasks after shutdown"
-    );
-    assert!(
-        !service.is_terminated(),
-        "service should wait for its active task to finish"
-    );
-    release_tx
-        .send(())
-        .expect("blocking task should receive its release signal");
-    handle.await.expect("blocking task should complete successfully");
+    assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::ShuttingDown);
+    assert!(service.is_not_running());
+    assert!(!service.is_terminated());
+    release_tx.send(()).unwrap();
+    handle.await.unwrap();
     service.wait_termination();
-    assert!(
-        service.is_terminated(),
-        "service should terminate after its active task finishes"
-    );
+    assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Terminated);
+    assert!(service.is_terminated());
 }

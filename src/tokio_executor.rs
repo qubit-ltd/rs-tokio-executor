@@ -78,6 +78,7 @@ use qubit_function::Callable;
 /// ```
 #[derive(Debug, Clone)]
 pub struct TokioExecutor {
+    /// Tokio runtime that receives blocking task submissions.
     handle: tokio::runtime::Handle,
 }
 
@@ -119,6 +120,12 @@ impl Executor for TokioExecutor {
     /// # Errors
     ///
     /// The bound runtime handle determines where the task is submitted.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `C` - Callable submitted for execution.
+    /// * `R` - Value returned by the callable.
+    /// * `E` - Error returned by the callable.
     fn call<C, R, E>(&self, task: C) -> Result<TrackedTask<R, E>, SubmissionError>
     where
         C: Callable<R, E> + Send + 'static,

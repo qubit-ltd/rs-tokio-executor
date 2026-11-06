@@ -10,6 +10,7 @@
 //! Tokio-backed executor and executor service implementations.
 
 mod executor_service_lifecycle_bits;
+mod internal;
 mod tokio_blocking_task_handle;
 mod tokio_executor;
 mod tokio_executor_service;
@@ -24,8 +25,8 @@ mod tokio_task_handle;
 mod tokio_task_registration;
 mod tokio_task_slot_cancellation;
 
-#[doc(hidden)]
-pub mod testing;
+#[cfg(test)]
+mod tests;
 
 pub use tokio_blocking_task_handle::TokioBlockingTaskHandle;
 pub use tokio_executor::TokioExecutor;

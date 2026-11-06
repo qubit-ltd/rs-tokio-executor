@@ -21,7 +21,7 @@ use tokio::task::AbortHandle;
 
 use crate::TokioIoExecutorServiceStats;
 use crate::executor_service_lifecycle_bits;
-use crate::tokio_task_registration::TaskRegistration;
+use crate::tokio_task_registration::TokioTaskRegistration;
 use crate::tokio_task_registration::key;
 
 /// Maximum number of accepted unfinished async tasks by default.
@@ -30,7 +30,7 @@ const DEFAULT_TASK_CAPACITY: usize = 1024;
 /// Abort handle tracked with a service-local task marker.
 struct TrackedAbortHandle {
     /// Marker shared with the lifecycle guard for the same task.
-    _marker: Arc<TaskRegistration>,
+    _marker: Arc<TokioTaskRegistration>,
     /// Tokio abort handle used by immediate shutdown.
     handle: AbortHandle,
 }
@@ -151,7 +151,7 @@ impl TokioIoExecutorServiceState {
     ///
     /// * `marker` - Service-local task marker shared with the lifecycle guard.
     /// * `handle` - Tokio abort handle for the accepted task.
-    pub(crate) fn register_abort_handle(&self, marker: Arc<TaskRegistration>, handle: AbortHandle) {
+    pub(crate) fn register_abort_handle(&self, marker: Arc<TokioTaskRegistration>, handle: AbortHandle) {
         let mut handles = self.lock_abort_handles();
         if !marker.is_finished() && !handle.is_finished() {
             let previous = handles.insert(
@@ -170,7 +170,7 @@ impl TokioIoExecutorServiceState {
     /// # Parameters
     ///
     /// * `marker` - Service-local task marker for the task that finished.
-    pub(crate) fn remove_abort_handle(&self, marker: &Arc<TaskRegistration>) {
+    pub(crate) fn remove_abort_handle(&self, marker: &Arc<TokioTaskRegistration>) {
         marker.finish();
         self.lock_abort_handles().remove(&key(marker));
     }

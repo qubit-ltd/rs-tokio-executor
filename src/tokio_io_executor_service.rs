@@ -9,16 +9,16 @@ use std::future::Future;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_executor::service::StopReport;
 use qubit_executor::service::SubmissionError;
 
 use crate::TokioIoExecutorServiceStats;
 use crate::TokioTaskHandle;
+use crate::internal::tokio_guarded_io_future::TokioGuardedIoFuture;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
-use crate::tokio_task_registration::TaskRegistration;
+use crate::tokio_task_registration::TokioTaskRegistration;
 
 /// Tokio-backed executor service for async IO and Future-based tasks.
 ///
@@ -47,11 +47,18 @@ pub struct TokioIoExecutorService {
 const DEFAULT_TASK_CAPACITY: usize = 1024;
 
 impl TokioIoExecutorService {
-    /// Creates a new service instance.
+    /// Creates a new service instance with the default capacity of 1024
+    /// unfinished tasks.
+    ///
+    /// Use [`Self::with_task_capacity`] to choose another nonzero limit.
     ///
     /// # Returns
     ///
     /// A Tokio-backed executor service for Future-based tasks.
+    ///
+    /// # Parameters
+    ///
+    /// * `runtime` - Tokio runtime used to execute accepted futures.
     #[must_use]
     #[inline]
     pub fn new(runtime: tokio::runtime::Handle) -> Self {
@@ -95,8 +102,10 @@ impl TokioIoExecutorService {
 
     /// Subscribes to changes that may make another future admissible.
     ///
-    /// A notification is only a hint; callers must retry submission because
-    /// another producer may consume the available capacity first.
+    /// Subscribe before the first submission attempt. After a saturated
+    /// attempt, wait for [`tokio::sync::watch::Receiver::changed`] and then
+    /// retry; the notification reserves no slot and gives producers no fairness
+    /// guarantee. Its generation value is not a capacity count.
     ///
     /// # Returns
     ///
@@ -112,12 +121,6 @@ impl TokioIoExecutorService {
     ///
     /// * `future` - Future to execute on Tokio's async scheduler.
     ///
-    /// # Type Parameters
-    ///
-    /// * `F` - Future submitted to the service.
-    /// * `R` - Successful output produced by the future.
-    /// * `E` - Error output produced by the future.
-    ///
     /// # Returns
     ///
     /// A [`TokioTaskHandle`] for the accepted task.
@@ -127,6 +130,12 @@ impl TokioIoExecutorService {
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
     /// requested, or [`SubmissionError::Saturated`] if the unfinished-task
     /// capacity is full.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - Future submitted for execution.
+    /// * `R` - Value returned by the future.
+    /// * `E` - Error returned by the future.
     pub fn spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, SubmissionError>
     where
         F: Future<Output = Result<R, E>> + Send + 'static,
@@ -140,13 +149,10 @@ impl TokioIoExecutorService {
         if !self.state.try_accept_task() {
             return Err(SubmissionError::Saturated);
         }
-        let marker = TaskRegistration::new();
+        let marker = TokioTaskRegistration::new();
         let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
 
-        let handle = self.runtime.spawn(async move {
-            let _guard = guard;
-            future.await.map_err(TaskExecutionError::Failed)
-        });
+        let handle = self.runtime.spawn(TokioGuardedIoFuture::new(future, guard));
         self.state.register_abort_handle(marker, handle.abort_handle());
         drop(admission);
         Ok(TokioTaskHandle::new(handle))
