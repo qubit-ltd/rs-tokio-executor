@@ -55,13 +55,13 @@ pub struct RejectedTask<T> {
 
 impl<T> RejectedTask<T> {
     /// Returns the reason the service rejected this task.
-    #[must_use]
+    #[must_use = "inspect the rejection reason"]
     pub fn reason(&self) -> &SubmissionError {
         &self.reason
     }
 
     /// Returns the rejection reason and the original task.
-    #[must_use]
+    #[must_use = "handle the rejection reason and recover the original task"]
     pub fn into_parts(self) -> (SubmissionError, T) {
         (self.reason, self.task)
     }
