@@ -11,6 +11,7 @@
 
 mod executor_service_lifecycle_bits;
 mod internal;
+mod rejected_task;
 mod tokio_blocking_task_handle;
 mod tokio_executor;
 mod tokio_executor_service;
@@ -35,4 +36,5 @@ pub use tokio_executor_service::TokioExecutorService;
 pub use tokio_executor_service_stats::TokioExecutorServiceStats;
 pub use tokio_io_executor_service::TokioIoExecutorService;
 pub use tokio_io_executor_service_stats::TokioIoExecutorServiceStats;
+pub use rejected_task::RejectedTask;
 pub use tokio_task_handle::TokioTaskHandle;

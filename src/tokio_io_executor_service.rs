@@ -13,6 +13,7 @@ use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_executor::service::StopReport;
 use qubit_executor::service::SubmissionError;
 
+use crate::RejectedTask;
 use crate::TokioIoExecutorServiceStats;
 use crate::TokioTaskHandle;
 use crate::internal::tokio_guarded_io_future::TokioGuardedIoFuture;
@@ -142,13 +143,27 @@ impl TokioIoExecutorService {
         R: Send + 'static,
         E: Send + 'static,
     {
+        self.try_spawn(future)
+            .map_err(|rejected| rejected.into_parts().0)
+    }
+
+    /// Attempts to accept an async task while retaining its future if rejected.
+    ///
+    /// A rejected future is returned unchanged; it has not been polled or
+    /// dropped. Shutdown is checked before capacity saturation.
+    pub fn try_spawn<F, R, E>(&self, future: F) -> Result<TokioTaskHandle<R, E>, RejectedTask<F>>
+    where
+        F: Future<Output = Result<R, E>> + Send + 'static,
+        R: Send + 'static,
+        E: Send + 'static,
+    {
         let (handle, sender, guard) = {
             let _admission = self.state.lock_submission();
             if self.state.is_not_running() {
-                return Err(SubmissionError::Shutdown);
+                return Err(RejectedTask::new(SubmissionError::Shutdown, future));
             }
             if !self.state.try_accept_task() {
-                return Err(SubmissionError::Saturated);
+                return Err(RejectedTask::new(SubmissionError::Saturated, future));
             }
             let marker = TokioTaskRegistration::new();
             let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));

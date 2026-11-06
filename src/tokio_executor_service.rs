@@ -25,6 +25,7 @@ use tokio::pin;
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use crate::RejectedTask;
 use crate::TokioBlockingTaskHandle;
 use crate::TokioExecutorServiceStats;
 use crate::tokio_executor_service_state::TokioExecutorServiceState;
@@ -186,6 +187,108 @@ impl TokioExecutorService {
         Self { state, runtime }
     }
 
+    /// Attempts to accept a runnable while retaining it if submission is rejected.
+    ///
+    /// A rejected runnable is returned unchanged and is neither run nor dropped.
+    /// Shutdown is checked before capacity saturation.
+    pub fn try_submit<T, E>(&self, task: T) -> Result<(), RejectedTask<T>>
+    where
+        T: Runnable<E> + Send + 'static,
+        E: Send + 'static,
+    {
+        let (marker, guard, admission) = match self.prepare_blocking_submission() {
+            Ok(submission) => submission,
+            Err(reason) => return Err(RejectedTask::new(reason, task)),
+        };
+        let abort_queued_task = guard.finish_queued_once_callback();
+        self.spawn_accepted_blocking_task(
+            marker,
+            admission,
+            guard,
+            move || {
+                let mut task = task;
+                let runner = TaskRunner::new(move || task.run());
+                let _ = runner.call::<(), E>();
+            },
+            abort_queued_task,
+        );
+        Ok(())
+    }
+
+    /// Attempts to accept a callable while retaining it if submission is rejected.
+    ///
+    /// A rejected callable is returned unchanged and has not been called.
+    /// Shutdown is checked before capacity saturation.
+    pub fn try_submit_callable<C, R, E>(&self, task: C) -> Result<TaskHandle<R, E>, RejectedTask<C>>
+    where
+        C: Callable<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: Send + 'static,
+    {
+        let (marker, guard, admission) = match self.prepare_blocking_submission() {
+            Ok(submission) => submission,
+            Err(reason) => return Err(RejectedTask::new(reason, task)),
+        };
+        let (handle, completion) = TaskEndpointPair::new().into_parts();
+        completion.accept();
+        let completion = share_task_slot(completion);
+        let abort_completion = Arc::clone(&completion);
+        let abort_queued_task = guard.finish_queued_once_callback();
+        self.spawn_accepted_blocking_task(
+            marker,
+            admission,
+            guard,
+            move || {
+                if let Some(completion) = take_task_slot(&completion) {
+                    TaskRunner::new(task).run(completion);
+                }
+            },
+            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
+        );
+        Ok(handle)
+    }
+
+    /// Attempts to accept a tracked callable while retaining it if rejected.
+    ///
+    /// A rejected callable is returned unchanged and has not been called.
+    /// Shutdown is checked before capacity saturation.
+    pub fn try_submit_tracked_callable<C, R, E>(
+        &self,
+        task: C,
+    ) -> Result<TokioBlockingTaskHandle<R, E>, RejectedTask<C>>
+    where
+        C: Callable<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: Send + 'static,
+    {
+        let (marker, guard, admission) = match self.prepare_blocking_submission() {
+            Ok(submission) => submission,
+            Err(reason) => return Err(RejectedTask::new(reason, task)),
+        };
+        let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
+        completion.accept();
+        let completion = share_task_slot(completion);
+        let abort_completion = Arc::clone(&completion);
+        let abort_queued_task = guard.finish_queued_once_callback();
+        let cancel_queued_task = guard.cancel_queued_callback();
+        let abort_handle = self.spawn_accepted_blocking_task(
+            marker,
+            admission,
+            guard,
+            move || {
+                if let Some(completion) = take_task_slot(&completion) {
+                    TaskRunner::new(task).run(completion);
+                }
+            },
+            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
+        );
+        Ok(TokioBlockingTaskHandle::new(
+            handle,
+            abort_handle,
+            cancel_queued_task,
+        ))
+    }
+
     /// Prepares a blocking-task submission context while holding admission.
     ///
     /// # Returns
@@ -291,20 +394,7 @@ impl ExecutorService for TokioExecutorService {
         T: Runnable<E> + Send + 'static,
         E: Send + 'static,
     {
-        let (marker, guard, admission) = self.prepare_blocking_submission()?;
-        let abort_queued_task = guard.finish_queued_once_callback();
-        self.spawn_accepted_blocking_task(
-            marker,
-            admission,
-            guard,
-            move || {
-                let mut task = task;
-                let runner = TaskRunner::new(move || task.run());
-                let _ = runner.call::<(), E>();
-            },
-            abort_queued_task,
-        );
-        Ok(())
+        self.try_submit(task).map_err(|rejected| rejected.into_parts().0)
     }
 
     /// Accepts a callable and runs it through Tokio.
@@ -334,24 +424,8 @@ impl ExecutorService for TokioExecutorService {
         R: Send + 'static,
         E: Send + 'static,
     {
-        let (marker, guard, admission) = self.prepare_blocking_submission()?;
-        let (handle, completion) = TaskEndpointPair::new().into_parts();
-        completion.accept();
-        let completion = share_task_slot(completion);
-        let abort_completion = Arc::clone(&completion);
-        let abort_queued_task = guard.finish_queued_once_callback();
-        self.spawn_accepted_blocking_task(
-            marker,
-            admission,
-            guard,
-            move || {
-                if let Some(completion) = take_task_slot(&completion) {
-                    TaskRunner::new(task).run(completion);
-                }
-            },
-            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
-        );
-        Ok(handle)
+        self.try_submit_callable(task)
+            .map_err(|rejected| rejected.into_parts().0)
     }
 
     /// Accepts a callable and returns an actively tracked handle.
@@ -381,25 +455,8 @@ impl ExecutorService for TokioExecutorService {
         R: Send + 'static,
         E: Send + 'static,
     {
-        let (marker, guard, admission) = self.prepare_blocking_submission()?;
-        let (handle, completion) = TaskEndpointPair::new().into_tracked_parts();
-        completion.accept();
-        let completion = share_task_slot(completion);
-        let abort_completion = Arc::clone(&completion);
-        let abort_queued_task = guard.finish_queued_once_callback();
-        let cancel_queued_task = guard.cancel_queued_callback();
-        let abort_handle = self.spawn_accepted_blocking_task(
-            marker,
-            admission,
-            guard,
-            move || {
-                if let Some(completion) = take_task_slot(&completion) {
-                    TaskRunner::new(task).run(completion);
-                }
-            },
-            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
-        );
-        Ok(TokioBlockingTaskHandle::new(handle, abort_handle, cancel_queued_task))
+        self.try_submit_tracked_callable(task)
+            .map_err(|rejected| rejected.into_parts().0)
     }
 
     /// Stops accepting new tasks.
