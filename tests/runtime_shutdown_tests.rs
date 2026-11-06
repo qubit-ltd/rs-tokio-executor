@@ -8,6 +8,9 @@
 use std::io;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -24,6 +27,8 @@ const OBSERVE_TIMEOUT: Duration = Duration::from_secs(2);
 
 const IO_REENTRANT_CHILD: &str = "QUBIT_IO_REENTRANT_CHILD";
 const IO_REENTRANT_ACTION: &str = "QUBIT_IO_REENTRANT_ACTION";
+const BLOCKING_REENTRANT_CHILD: &str = "QUBIT_BLOCKING_REENTRANT_CHILD";
+const BLOCKING_REENTRANT_ACTION: &str = "QUBIT_BLOCKING_REENTRANT_ACTION";
 
 #[derive(Clone, Copy)]
 enum ReentrantAction {
@@ -45,6 +50,23 @@ impl Drop for ReentrantDrop {
                 let _ = self.0.spawn(async { Ok::<(), io::Error>(()) });
             }
         }
+    }
+}
+
+struct BlockingReentrantDrop(TokioExecutorService, ReentrantAction, Arc<AtomicUsize>);
+
+impl Drop for BlockingReentrantDrop {
+    fn drop(&mut self) {
+        match self.1 {
+            ReentrantAction::Shutdown => self.0.shutdown(),
+            ReentrantAction::Stop => {
+                let _ = self.0.stop();
+            }
+            ReentrantAction::Submit => {
+                let _ = self.0.submit_callable(|| Ok::<(), io::Error>(()));
+            }
+        }
+        self.2.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -100,6 +122,65 @@ fn test_io_submission_after_runtime_shutdown_does_not_deadlock_on_drop() {
                 child.kill().expect("timed-out child should be killed");
                 let _ = child.wait();
                 panic!("submission after runtime shutdown deadlocked in future Drop ({action})");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+#[test]
+fn test_blocking_submission_after_runtime_shutdown_child() {
+    if std::env::var_os(BLOCKING_REENTRANT_CHILD).is_none() {
+        return;
+    }
+    let action = match std::env::var(BLOCKING_REENTRANT_ACTION).as_deref() {
+        Ok("stop") => ReentrantAction::Stop,
+        Ok("submit") => ReentrantAction::Submit,
+        _ => ReentrantAction::Shutdown,
+    };
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let service = TokioExecutorService::new(runtime.handle().clone());
+    let drops = Arc::new(AtomicUsize::new(0));
+    let drop_service = service.clone();
+    let drop_count = Arc::clone(&drops);
+    runtime.shutdown_background();
+    let mut probe = Some(BlockingReentrantDrop(drop_service, action, drop_count));
+    let result = service.submit_callable(move || {
+        drop(probe.take());
+        Ok::<(), io::Error>(())
+    });
+    assert!(result.is_ok(), "closed-runtime submission remains accepted");
+    assert_eq!(drops.load(Ordering::SeqCst), 1, "callable should drop once");
+}
+
+#[test]
+fn test_blocking_submission_after_runtime_shutdown_does_not_deadlock_on_drop() {
+    for action in ["shutdown", "stop", "submit"] {
+        let mut child = Command::new(std::env::current_exe().expect("test executable path"))
+            .args([
+                "--exact",
+                "test_blocking_submission_after_runtime_shutdown_child",
+                "--nocapture",
+            ])
+            .env(BLOCKING_REENTRANT_CHILD, "1")
+            .env(BLOCKING_REENTRANT_ACTION, action)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("child test should start");
+        let deadline = Instant::now() + OBSERVE_TIMEOUT;
+        loop {
+            if let Some(status) = child.try_wait().expect("child status should be readable") {
+                assert!(
+                    status.success(),
+                    "blocking child test for {action} should finish successfully"
+                );
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().expect("timed-out child should be killed");
+                let _ = child.wait();
+                panic!("blocking submission deadlocked in future Drop ({action})");
             }
             thread::sleep(Duration::from_millis(10));
         }

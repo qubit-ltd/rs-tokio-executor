@@ -211,17 +211,14 @@ impl TokioExecutorService {
             Err(reason) => return Err(RejectedTask::new(reason, task)),
         };
         let abort_queued_task = guard.finish_queued_once_callback();
-        self.spawn_accepted_blocking_task(
-            marker,
-            admission,
-            guard,
-            move || {
-                let mut task = task;
-                let runner = TaskRunner::new(move || task.run());
-                let _ = runner.call::<(), E>();
-            },
-            abort_queued_task,
-        );
+        let (_, sender) = self.spawn_accepted_blocking_task(marker, admission, guard, abort_queued_task);
+        if let Err(task) = sender.send(move || {
+            let mut task = task;
+            let runner = TaskRunner::new(move || task.run());
+            let _ = runner.call::<(), E>();
+        }) {
+            drop(task);
+        }
         Ok(())
     }
 
@@ -255,17 +252,16 @@ impl TokioExecutorService {
         let completion = share_task_slot(completion);
         let abort_completion = Arc::clone(&completion);
         let abort_queued_task = guard.finish_queued_once_callback();
-        self.spawn_accepted_blocking_task(
-            marker,
-            admission,
-            guard,
-            move || {
-                if let Some(completion) = take_task_slot(&completion) {
-                    TaskRunner::new(task).run(completion);
-                }
-            },
-            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
-        );
+        let (_, sender) = self.spawn_accepted_blocking_task(marker, admission, guard, move || {
+            cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task)
+        });
+        if let Err(task) = sender.send(move || {
+            if let Some(completion) = take_task_slot(&completion) {
+                TaskRunner::new(task).run(completion);
+            }
+        }) {
+            drop(task);
+        }
         Ok(handle)
     }
 
@@ -302,17 +298,16 @@ impl TokioExecutorService {
         let abort_completion = Arc::clone(&completion);
         let abort_queued_task = guard.finish_queued_once_callback();
         let cancel_queued_task = guard.cancel_queued_callback();
-        let abort_handle = self.spawn_accepted_blocking_task(
-            marker,
-            admission,
-            guard,
-            move || {
-                if let Some(completion) = take_task_slot(&completion) {
-                    TaskRunner::new(task).run(completion);
-                }
-            },
-            move || cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task),
-        );
+        let (abort_handle, sender) = self.spawn_accepted_blocking_task(marker, admission, guard, move || {
+            cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task)
+        });
+        if let Err(task) = sender.send(move || {
+            if let Some(completion) = take_task_slot(&completion) {
+                TaskRunner::new(task).run(completion);
+            }
+        }) {
+            drop(task);
+        }
         Ok(TokioBlockingTaskHandle::new(handle, abort_handle, cancel_queued_task))
     }
 
@@ -346,38 +341,42 @@ impl TokioExecutorService {
     ///
     /// # Type Parameters
     ///
-    /// * `F` - Accepted task body submitted to Tokio.
+    /// * `F` - User task closure delivered after admission is released.
     /// * `C` - Hook used to cancel queued service accounting.
     ///
     /// # Parameters
     ///
     /// * `marker` - Registration marker for the accepted task.
-    /// * `_admission` - Guard that holds submission admission until spawning.
+    /// * `_admission` - Guard that holds admission through spawn and
+    ///   registration.
     /// * `guard` - Lifecycle guard for the accepted task.
-    /// * `task` - Task body to run after the lifecycle guard starts.
     /// * `cancel` - Queued-cancellation hook registered with the service.
+    ///
+    /// # Returns
+    ///
+    /// The registered abort handle and sender used to deliver the user task.
     fn spawn_accepted_blocking_task<F, C>(
         &self,
         marker: Arc<TokioTaskRegistration>,
         _admission: MutexGuard<'_, ()>,
         guard: TokioServiceTaskGuard,
-        task: F,
         cancel: C,
-    ) -> AbortHandle
+    ) -> (AbortHandle, tokio::sync::oneshot::Sender<F>)
     where
         F: FnOnce() + Send + 'static,
         C: FnOnce() -> bool + Send + 'static,
     {
+        let (sender, receiver) = tokio::sync::oneshot::channel::<F>();
         let join_handle = self.runtime.spawn_blocking(move || {
-            let guard = guard;
-            if !guard.mark_started() {
-                return;
+            if let Ok(task) = receiver.blocking_recv()
+                && guard.mark_started()
+            {
+                task();
             }
-            task();
         });
         let abort_handle = join_handle.abort_handle();
         self.state.register_abort_handle(marker, abort_handle.clone(), cancel);
-        abort_handle
+        (abort_handle, sender)
     }
 }
 
