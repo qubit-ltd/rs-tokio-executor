@@ -34,17 +34,26 @@ fn package_version() -> String {
         .to_owned()
 }
 
-/// Ensures README dependency snippets use the crate package major.minor line.
+/// Ensures all user-facing installation snippets use the crate package
+/// major.minor line.
 #[test]
-fn test_readmes_use_current_crate_version() {
+fn test_user_docs_use_current_crate_version() {
     let version = package_version();
     let minor_version = minor_series(&version).expect("package version should have major.minor");
     let dependency = format!("qubit-tokio-executor = \"{minor_version}\"");
     let readme_en = read_project_file("README.md");
     let readme_zh = read_project_file("README.zh_CN.md");
+    let guide_en = read_project_file("doc/user_guide.md");
+    let guide_zh = read_project_file("doc/user_guide.zh_CN.md");
 
-    assert!(readme_en.contains(&dependency));
-    assert!(readme_zh.contains(&dependency));
+    for (name, document) in [
+        ("README.md", &readme_en),
+        ("README.zh_CN.md", &readme_zh),
+        ("doc/user_guide.md", &guide_en),
+        ("doc/user_guide.zh_CN.md", &guide_zh),
+    ] {
+        assert!(document.contains(&dependency), "{name} must declare {dependency}");
+    }
 }
 
 /// Returns `major.minor` from a semver string.
@@ -63,14 +72,21 @@ fn minor_series(version: &str) -> Option<String> {
     Some(format!("{major}.{minor}"))
 }
 
-/// Ensures READMEs no longer document removed or renamed APIs.
+/// Ensures user docs no longer document removed or renamed APIs.
 #[test]
-fn test_readmes_do_not_reference_removed_api_names() {
+fn test_user_docs_do_not_reference_removed_api_names() {
     let readme_en = read_project_file("README.md");
     let readme_zh = read_project_file("README.zh_CN.md");
+    let guide_en = read_project_file("doc/user_guide.md");
+    let guide_zh = read_project_file("doc/user_guide.zh_CN.md");
 
-    for readme in [&readme_en, &readme_zh] {
-        assert!(!readme.contains("RejectedExecution"));
-        assert!(!readme.contains("TokioExecution"));
+    for (name, document) in [
+        ("README.md", &readme_en),
+        ("README.zh_CN.md", &readme_zh),
+        ("doc/user_guide.md", &guide_en),
+        ("doc/user_guide.zh_CN.md", &guide_zh),
+    ] {
+        assert!(!document.contains("RejectedExecution"), "{name} references removed API");
+        assert!(!document.contains("TokioExecution"), "{name} references removed API");
     }
 }
