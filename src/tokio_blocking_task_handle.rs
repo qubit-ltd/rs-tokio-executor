@@ -9,6 +9,7 @@ use std::future::IntoFuture;
 use std::sync::Arc;
 
 use qubit_executor::CancelResult;
+use qubit_executor::CancellableTaskHandle;
 use qubit_executor::TaskResult;
 use qubit_executor::TaskStatus;
 use qubit_executor::TrackedTask;
@@ -293,6 +294,18 @@ where
     #[inline]
     fn cancel(&self) -> CancelResult {
         Self::cancel(self)
+    }
+}
+
+impl<R, E> CancellableTaskHandle<R, E> for TokioBlockingTaskHandle<R, E>
+where
+    R: Send + 'static,
+    E: Send + 'static,
+{
+    /// Returns the cancellation endpoint with Tokio queue cleanup preserved.
+    #[inline]
+    fn cancellation_handle(&self) -> TaskCancellationHandle {
+        TokioBlockingTaskHandle::cancellation_handle(self)
     }
 }
 
