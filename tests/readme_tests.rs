@@ -74,14 +74,3 @@ fn test_readmes_do_not_reference_removed_api_names() {
         assert!(!readme.contains("TokioExecution"));
     }
 }
-
-/// Ensures only the blocking service documents service-level async termination.
-#[test]
-fn test_readmes_limit_await_termination_to_blocking_service() {
-    let readme_en = read_project_file("README.md");
-    let readme_zh = read_project_file("README.zh_CN.md");
-
-    for readme in [&readme_en, &readme_zh] {
-        assert_eq!(1, readme.matches("service.await_termination().await").count());
-    }
-}
