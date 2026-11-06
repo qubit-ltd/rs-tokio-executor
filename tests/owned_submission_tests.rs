@@ -22,6 +22,14 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 struct ReleaseOnDrop(Option<mpsc::Sender<()>>);
 
+struct DropCounter(Arc<AtomicUsize>);
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 impl ReleaseOnDrop {
     fn release(&mut self) {
         if let Some(sender) = self.0.take() {
@@ -150,7 +158,10 @@ fn test_saturated_callable_can_be_recovered_and_submitted_once() {
 
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_in_callable = Arc::clone(&calls);
+    let drops = Arc::new(AtomicUsize::new(0));
+    let drop_probe = DropCounter(Arc::clone(&drops));
     let callable = move || {
+        let _drop_probe = &drop_probe;
         calls_in_callable.fetch_add(1, Ordering::SeqCst);
         Ok::<usize, io::Error>(42)
     };
@@ -161,6 +172,7 @@ fn test_saturated_callable_can_be_recovered_and_submitted_once() {
     assert!(matches!(rejected.reason(), SubmissionError::Saturated));
     let (_, callable) = rejected.into_parts();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(drops.load(Ordering::SeqCst), 0, "rejection must retain captures");
 
     let mut changes = service.capacity_changes();
     release.release();
@@ -176,6 +188,95 @@ fn test_saturated_callable_can_be_recovered_and_submitted_once() {
         .expect("recovered callable should be accepted");
     assert_eq!(result.get().expect("recovered callable should finish"), 42);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(drops.load(Ordering::SeqCst), 1, "accepted callable should drop once");
+    service.shutdown();
+    assert!(service.wait_termination_timeout(Duration::from_secs(2)));
+}
+
+#[test]
+fn test_saturated_runnable_and_tracked_callable_can_be_recovered() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let service = TokioExecutorService::with_task_capacity(
+        runtime.handle().clone(),
+        NonZeroUsize::new(1).expect("capacity should be nonzero"),
+    );
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
+    let blocker = service
+        .submit_callable(move || {
+            started_tx.send(()).expect("test should observe blocker start");
+            release_rx.recv().expect("test should release blocker");
+            Ok::<(), io::Error>(())
+        })
+        .expect("blocker should be accepted");
+    started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("blocking callable should start");
+
+    let mut changes = service.capacity_changes();
+    let runnable_calls = Arc::new(AtomicUsize::new(0));
+    let runnable_calls_in_task = Arc::clone(&runnable_calls);
+    let runnable_drops = Arc::new(AtomicUsize::new(0));
+    let runnable_probe = DropCounter(Arc::clone(&runnable_drops));
+    let runnable = move || {
+        let _probe = &runnable_probe;
+        runnable_calls_in_task.fetch_add(1, Ordering::SeqCst);
+        Ok::<(), io::Error>(())
+    };
+    let rejected = service
+        .try_submit::<_, io::Error>(runnable)
+        .expect_err("full capacity should reject the runnable");
+    assert!(matches!(rejected.reason(), SubmissionError::Saturated));
+    let (_, runnable) = rejected.into_parts();
+    assert_eq!(runnable_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(runnable_drops.load(Ordering::SeqCst), 0);
+
+    let tracked_calls = Arc::new(AtomicUsize::new(0));
+    let tracked_calls_in_task = Arc::clone(&tracked_calls);
+    let tracked_drops = Arc::new(AtomicUsize::new(0));
+    let tracked_probe = DropCounter(Arc::clone(&tracked_drops));
+    let tracked = move || {
+        let _probe = &tracked_probe;
+        tracked_calls_in_task.fetch_add(1, Ordering::SeqCst);
+        Ok::<usize, io::Error>(42)
+    };
+    let rejected = match service.try_submit_tracked_callable::<_, usize, io::Error>(tracked) {
+        Err(rejected) => rejected,
+        Ok(_) => panic!("full capacity should reject the tracked callable"),
+    };
+    assert!(matches!(rejected.reason(), SubmissionError::Saturated));
+    let (_, tracked) = rejected.into_parts();
+    assert_eq!(tracked_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(tracked_drops.load(Ordering::SeqCst), 0);
+
+    release.release();
+    assert_eq!(blocker.get().expect("blocker should finish"), ());
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), changes.changed())
+            .await
+            .expect("blocker completion should change capacity")
+            .expect("capacity watcher should remain open");
+    });
+
+    service
+        .try_submit::<_, io::Error>(runnable)
+        .expect("recovered runnable should be accepted");
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), changes.changed())
+            .await
+            .expect("runnable completion should change capacity")
+            .expect("capacity watcher should remain open");
+    });
+    assert_eq!(runnable_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(runnable_drops.load(Ordering::SeqCst), 1);
+
+    let tracked = service
+        .try_submit_tracked_callable::<_, usize, io::Error>(tracked)
+        .expect("recovered tracked callable should be accepted");
+    assert_eq!(tracked.get().expect("tracked callable should finish"), 42);
+    assert_eq!(tracked_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(tracked_drops.load(Ordering::SeqCst), 1);
     service.shutdown();
     assert!(service.wait_termination_timeout(Duration::from_secs(2)));
 }
@@ -195,7 +296,10 @@ fn test_saturated_non_unpin_future_can_be_recovered_and_submitted_once() {
         .expect("first future should be accepted");
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_in_future = Arc::clone(&calls);
+    let drops = Arc::new(AtomicUsize::new(0));
+    let drop_probe = DropCounter(Arc::clone(&drops));
     let future = async move {
+        let _drop_probe = &drop_probe;
         let _pin = std::marker::PhantomPinned;
         calls_in_future.fetch_add(1, Ordering::SeqCst);
         Ok::<usize, io::Error>(42)
@@ -207,6 +311,7 @@ fn test_saturated_non_unpin_future_can_be_recovered_and_submitted_once() {
     assert!(matches!(rejected.reason(), SubmissionError::Saturated));
     let (_, future) = rejected.into_parts();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(drops.load(Ordering::SeqCst), 0, "rejection must retain captures");
 
     runtime.block_on(async {
         let _ = blocker.cancel();
@@ -215,6 +320,7 @@ fn test_saturated_non_unpin_future_can_be_recovered_and_submitted_once() {
     let result = service.try_spawn(future).expect("recovered future should be accepted");
     assert_eq!(runtime.block_on(result).expect("future should finish"), 42);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(drops.load(Ordering::SeqCst), 1, "accepted future should drop once");
     service.shutdown();
     runtime.block_on(service.await_termination());
 }
