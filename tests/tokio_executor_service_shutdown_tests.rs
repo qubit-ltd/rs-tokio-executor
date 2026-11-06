@@ -5,8 +5,10 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::future::Future;
 use std::io;
 use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use qubit_executor::TaskExecutionError;
@@ -16,6 +18,22 @@ use qubit_tokio_executor::TokioExecutorService;
 
 fn ok_unit_task() -> Result<(), io::Error> {
     Ok(())
+}
+
+struct ReleaseOnDrop(Option<Sender<()>>);
+
+impl ReleaseOnDrop {
+    fn release(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        self.release();
+    }
 }
 
 #[tokio::test]
@@ -33,16 +51,42 @@ async fn test_tokio_executor_service_shutdown_rejects_new_tasks() {
 #[tokio::test]
 async fn test_tokio_executor_service_wait_termination_waits_for_tasks() {
     let service = TokioExecutorService::new(tokio::runtime::Handle::current());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
 
     let handle = service
-        .submit_tracked(|| {
-            std::thread::sleep(Duration::from_millis(50));
+        .submit_tracked(move || {
+            started_tx.send(()).expect("test should receive task start signal");
+            release_rx.recv().expect("task should receive release signal");
             Ok::<(), io::Error>(())
         })
         .expect("service should accept task");
 
+    started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("task should start");
     service.shutdown();
-    service.wait_termination();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (completed_tx, completed_rx) = mpsc::channel();
+    let waiter_service = service.clone();
+    let waiter = std::thread::spawn(move || {
+        entered_tx
+            .send(())
+            .expect("test should receive waiter entry signal");
+        waiter_service.wait_termination();
+        completed_tx.send(()).expect("test should receive waiter completion");
+    });
+    entered_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("waiter should enter before the completion check");
+    assert!(matches!(completed_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+    release.release();
+    completed_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("waiter should finish after task release");
+    waiter.join().expect("waiter thread should finish");
 
     handle.await.expect("task should complete successfully");
     assert!(service.is_not_running());
@@ -52,16 +96,32 @@ async fn test_tokio_executor_service_wait_termination_waits_for_tasks() {
 #[tokio::test]
 async fn test_tokio_executor_service_await_termination_waits_for_tasks() {
     let service = TokioExecutorService::new(tokio::runtime::Handle::current());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
 
     let handle = service
-        .submit_tracked(|| {
-            std::thread::sleep(Duration::from_millis(50));
+        .submit_tracked(move || {
+            started_tx.send(()).expect("test should receive task start signal");
+            release_rx.recv().expect("task should receive release signal");
             Ok::<(), io::Error>(())
         })
         .expect("service should accept task");
 
+    started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("task should start");
     service.shutdown();
-    service.await_termination().await;
+    let termination = service.await_termination();
+    tokio::pin!(termination);
+    let first_poll = std::future::poll_fn(|context| {
+        std::task::Poll::Ready(termination.as_mut().poll(context))
+    })
+    .await;
+    assert!(first_poll.is_pending());
+
+    release.release();
+    termination.await;
 
     handle.await.expect("task should complete successfully");
     assert!(service.is_not_running());
@@ -80,17 +140,27 @@ async fn test_tokio_executor_service_wait_termination_timeout_handles_max_durati
 #[tokio::test]
 async fn test_tokio_executor_service_wait_termination_timeout_reports_pending() {
     let service = TokioExecutorService::new(tokio::runtime::Handle::current());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
+
     let handle = service
-        .submit_tracked(|| {
-            std::thread::sleep(Duration::from_millis(50));
+        .submit_tracked(move || {
+            started_tx.send(()).expect("test should receive task start signal");
+            release_rx.recv().expect("task should receive release signal");
             Ok::<(), io::Error>(())
         })
         .expect("service should accept task");
 
+    started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("task should start");
     service.shutdown();
     assert!(!service.wait_termination_timeout(Duration::from_millis(1)));
+    release.release();
     service.wait_termination();
     handle.await.expect("task should complete successfully");
+    assert!(service.is_terminated());
 }
 
 #[tokio::test]
