@@ -6,8 +6,11 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::io;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 use qubit_executor::TaskExecutionError;
 use qubit_executor::executor::Executor;
@@ -17,6 +20,96 @@ use qubit_tokio_executor::TokioExecutorService;
 use qubit_tokio_executor::TokioIoExecutorService;
 
 const OBSERVE_TIMEOUT: Duration = Duration::from_secs(2);
+
+const IO_REENTRANT_CHILD: &str = "QUBIT_IO_REENTRANT_CHILD";
+const IO_REENTRANT_ACTION: &str = "QUBIT_IO_REENTRANT_ACTION";
+
+#[derive(Clone, Copy)]
+enum ReentrantAction {
+    Shutdown,
+    Stop,
+    Submit,
+}
+
+struct ReentrantDrop(TokioIoExecutorService, ReentrantAction);
+
+impl Drop for ReentrantDrop {
+    fn drop(&mut self) {
+        match self.1 {
+            ReentrantAction::Shutdown => self.0.shutdown(),
+            ReentrantAction::Stop => {
+                let _ = self.0.stop();
+            }
+            ReentrantAction::Submit => {
+                let _ = self.0.spawn(async { Ok::<(), io::Error>(()) });
+            }
+        }
+    }
+}
+
+#[test]
+fn test_io_submission_after_runtime_shutdown_child() {
+    if std::env::var_os(IO_REENTRANT_CHILD).is_none() {
+        return;
+    }
+    let action = match std::env::var(IO_REENTRANT_ACTION).as_deref() {
+        Ok("stop") => ReentrantAction::Stop,
+        Ok("submit") => ReentrantAction::Submit,
+        _ => ReentrantAction::Shutdown,
+    };
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let service = TokioIoExecutorService::new(runtime.handle().clone());
+    let drop_service = service.clone();
+    runtime.shutdown_background();
+    let probe = ReentrantDrop(drop_service, action);
+    let result = service.spawn(async move {
+        let _probe = probe;
+        Ok::<(), io::Error>(())
+    });
+    assert!(
+        result.is_ok(),
+        "closed-runtime admission retains its existing result"
+    );
+    assert_eq!(
+        service.stats().accepted_unfinished,
+        0,
+        "failed handoff should release task accounting"
+    );
+}
+
+#[test]
+fn test_io_submission_after_runtime_shutdown_does_not_deadlock_on_drop() {
+    for action in ["shutdown", "stop", "submit"] {
+        let mut child = Command::new(std::env::current_exe().expect("test executable path"))
+            .args([
+                "--exact",
+                "test_io_submission_after_runtime_shutdown_child",
+                "--nocapture",
+            ])
+            .env(IO_REENTRANT_CHILD, "1")
+            .env(IO_REENTRANT_ACTION, action)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("child test should start");
+        let deadline = Instant::now() + OBSERVE_TIMEOUT;
+        loop {
+            if let Some(status) = child.try_wait().expect("child status should be readable") {
+                assert!(
+                    status.success(),
+                    "child test for {action} should finish successfully"
+                );
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().expect("timed-out child should be killed");
+                let _ = child.wait();
+                panic!("submission after runtime shutdown deadlocked in future Drop ({action})");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
 
 /// Releases a test blocking worker during normal return or panic unwinding.
 struct ReleaseOnDrop(Option<mpsc::Sender<()>>);

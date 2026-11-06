@@ -142,19 +142,31 @@ impl TokioIoExecutorService {
         R: Send + 'static,
         E: Send + 'static,
     {
-        let admission = self.state.lock_submission();
-        if self.state.is_not_running() {
-            return Err(SubmissionError::Shutdown);
-        }
-        if !self.state.try_accept_task() {
-            return Err(SubmissionError::Saturated);
-        }
-        let marker = TokioTaskRegistration::new();
-        let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+        let (handle, sender, guard) = {
+            let _admission = self.state.lock_submission();
+            if self.state.is_not_running() {
+                return Err(SubmissionError::Shutdown);
+            }
+            if !self.state.try_accept_task() {
+                return Err(SubmissionError::Saturated);
+            }
+            let marker = TokioTaskRegistration::new();
+            let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+            let (sender, receiver) = tokio::sync::oneshot::channel::<TokioGuardedIoFuture<F>>();
+            let handle = self.runtime.spawn(async move {
+                match receiver.await {
+                    Ok(future) => future.await,
+                    Err(_) => Err(qubit_executor::TaskExecutionError::Cancelled),
+                }
+            });
+            self.state.register_abort_handle(marker, handle.abort_handle());
+            (handle, sender, guard)
+        };
 
-        let handle = self.runtime.spawn(TokioGuardedIoFuture::new(future, guard));
-        self.state.register_abort_handle(marker, handle.abort_handle());
-        drop(admission);
+        let payload = TokioGuardedIoFuture::new(future, guard);
+        if let Err(payload) = sender.send(payload) {
+            drop(payload);
+        }
         Ok(TokioTaskHandle::new(handle))
     }
 
