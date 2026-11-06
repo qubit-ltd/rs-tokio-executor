@@ -23,7 +23,10 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 
 The crate does not create or own a Tokio runtime. Construct a service with the
 application's `tokio::runtime::Handle`, and keep that runtime alive while work
-may run.
+may run. A handle does not drive the runtime: a current-thread runtime advances
+only while its owner calls `Runtime::block_on`. Awaiting a task handle from a
+different runtime does not drive the bound runtime, and `stop` cleanup also
+needs that runtime to make progress. See the [runtime guidance](doc/user_guide.md#runtime-lifetime-and-driver-progress).
 
 ## Quick Start
 

@@ -60,6 +60,10 @@ impl TokioIoExecutorService {
     /// # Parameters
     ///
     /// * `runtime` - Tokio runtime used to execute accepted futures.
+    ///
+    /// The supplied handle does not drive the runtime. In particular, a
+    /// current-thread runtime advances only while its owner calls
+    /// `Runtime::block_on`. See the [runtime guide](https://github.com/qubit-ltd/rs-tokio-executor/blob/main/doc/user_guide.md#runtime-lifetime-and-driver-progress).
     #[must_use]
     #[inline]
     pub fn new(runtime: tokio::runtime::Handle) -> Self {
@@ -79,6 +83,10 @@ impl TokioIoExecutorService {
     ///
     /// * `runtime` - Tokio runtime used to execute accepted futures.
     /// * `task_capacity` - Nonzero limit for accepted unfinished futures.
+    ///
+    /// Keep the bound runtime alive and driven until accepted futures finish.
+    /// A `Handle` alone does not drive a current-thread runtime; its owner must
+    /// call `Runtime::block_on`. See the [runtime guide](https://github.com/qubit-ltd/rs-tokio-executor/blob/main/doc/user_guide.md#runtime-lifetime-and-driver-progress).
     ///
     /// # Returns
     ///

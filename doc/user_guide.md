@@ -11,7 +11,9 @@ abstractions for blocking callables or asynchronous futures.
 The crate binds each executor or service to a `tokio::runtime::Handle` supplied
 at construction. Submission can use that captured runtime even when the caller
 is executing in another runtime or a plain thread, as long as the bound runtime
-remains alive.
+remains alive. Submission location and runtime progress are separate: the
+handle selects where work is submitted, but it does not start or drive that
+runtime.
 
 | Work type | Service | Tokio primitive | Result handle |
 | --- | --- | --- | --- |
@@ -21,6 +23,24 @@ remains alive.
 `shutdown` closes admission and lets accepted work finish. `stop` closes
 admission and requests cancellation. A successful submission only means that
 the service accepted the work; await its returned handle to learn its result.
+
+## Runtime Lifetime and Driver Progress
+
+Keep the runtime that owns the supplied handle alive until its accepted work
+has finished. It also must be driven so Tokio can poll async work and process
+cancellation. A multi-thread runtime drives its workers while it is running. A
+current-thread runtime advances only while its owner is inside
+`Runtime::block_on`; merely holding its `Handle` does not make progress.
+
+For example, awaiting a `TokioTaskHandle` inside another runtime polls that
+handle but does not drive the bound current-thread runtime. Drive the bound
+runtime with its own `block_on` (or keep the application running inside that
+runtime) until the task and service finish. `stop` requests aborts, but Tokio
+must still run to drop the cancelled futures and update service accounting.
+Likewise, awaiting `await_termination()` from a different runtime does not
+advance a bound current-thread runtime. Do not synchronously wait on a task
+from the thread that must drive that task; use async waiting while the runtime
+continues to run.
 
 ## Scenario
 
@@ -117,22 +137,21 @@ polled. Both include `lifecycle`. These values are a snapshot for diagnosis,
 not a reservation or guarantee that the next submission will be accepted.
 
 For retry after saturation, subscribe with `capacity_changes()` **before the
-first submission attempt**. After `SubmissionError::Saturated`, wait for
-`changed()` and retry; return other errors. The notification is only a hint:
-it reserves no slot, promises no fairness, and its generation is not a count of
-available capacity. Submission consumes its task by value even when rejected,
-so the original callable or future is not returned. A retry must retain the
-callable in an ownership slot such as `Arc<Mutex<Option<C>>>`; a wrapper closure
-takes it when run, releases the mutex, and only then calls it. Do not assume an
-arbitrary future can be cloned or safely run twice. Cancelling the wait before
-acceptance drops the current wrapper. Keep the ownership slot outside the
-cancelled retry operation if the application must recover the original task.
-After an accepted wrapper takes the task from the slot, that task has been
-consumed and cannot be retried. `Shutdown` and other errors end the loop
-immediately so the caller can decide what to do with any task still in its
-slot.
+first submission attempt**. Use the inherent `try_submit`,
+`try_submit_callable`, `try_submit_tracked_callable`, or `try_spawn` method. A
+rejection contains a `RejectedTask<T>`; call `into_parts()` to recover the
+reason and the same unrun task. Keep that task in a local `Option` or variable,
+wait for `changed()` only after `SubmissionError::Saturated`, then retry with
+the recovered task. The notification is only a hint: it reserves no slot,
+promises no fairness, and its generation is not a count of available capacity.
+Return or otherwise handle `Shutdown` and other errors instead of retrying
+them. If the retry future itself is cancelled while waiting, its local task is
+dropped with that future; keep ownership outside the cancellable operation if
+the application must retain it across cancellation. `RejectedTask` formats
+only the rejection reason with `Debug`, so task captures are not printed and
+the task type need not implement `Debug`.
 
-The following complete programs are also kept as standalone files: [callable retry](../examples/capacity_retry_callable.rs) and [future retry](../examples/capacity_retry_future.rs). Each subscribes before its first attempt, occupies a capacity-one service with a channel-controlled task, requires the first attempt to be `Saturated`, and retries after release. The future version stores `Pin<Box<F>>` in `Arc<Mutex<Option<_>>>`, takes it on first poll, drops the lock, and then awaits it. Both assert result 42 and one execution before shutdown and termination.
+The following complete programs are also kept as standalone files: [callable retry](../examples/capacity_retry_callable.rs) and [future retry](../examples/capacity_retry_future.rs). Each subscribes before its first attempt, occupies a capacity-one service with a channel-controlled task, requires the first attempt to be `Saturated`, recovers the original task through `RejectedTask::into_parts()`, and retries after release. Both assert result 42 and one execution before shutdown and termination.
 
 Callable retry program:
 
@@ -140,9 +159,9 @@ Callable retry program:
 use std::io;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 
 use qubit_executor::service::ExecutorService;
 use qubit_executor::service::SubmissionError;
@@ -171,53 +190,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     started_rx.await?;
 
-    // Keep the original FnOnce in this slot. A saturated submission consumes
-    // its wrapper, but cannot consume the callable held by the slot.
+    // This non-Clone callable stays in the caller's hands until admission
+    // succeeds. Saturation returns it without running or dropping it.
     let calls = Arc::new(AtomicUsize::new(0));
     let callable_calls = Arc::clone(&calls);
-    let callable = Arc::new(Mutex::new(Some(move || {
+    let mut callable = Some(move || {
         callable_calls.fetch_add(1, Ordering::SeqCst);
         Ok::<usize, io::Error>(40 + 2)
-    })));
+    });
     let mut changes = service.capacity_changes();
     let mut blocker_released = false;
     let mut saturated_attempts = 0;
     let result = loop {
-        let callable = Arc::clone(&callable);
-        let attempt = service.submit_callable(move || {
-            let callable = callable
-                .lock()
-                .expect("callable mutex poisoned")
-                .take()
-                .expect("accepted wrapper runs once");
-            callable()
-        });
-
-        match attempt {
+        let task = callable.take().expect("rejected callable is restored");
+        match service.try_submit_callable(task) {
             Ok(handle) => {
                 assert_eq!(saturated_attempts, 1, "first attempt must be saturated");
                 break handle.await?;
             }
-            Err(SubmissionError::Saturated) => {
-                saturated_attempts += 1;
-                if !blocker_released {
-                    release_tx.send(())?;
-                    blocker_released = true;
+            Err(rejected) => {
+                let (reason, task) = rejected.into_parts();
+                callable = Some(task);
+                match reason {
+                    SubmissionError::Saturated => {
+                        saturated_attempts += 1;
+                        if !blocker_released {
+                            release_tx.send(())?;
+                            blocker_released = true;
+                        }
+                        changes.changed().await?;
+                    }
+                    SubmissionError::Shutdown => {
+                        return Err("service shut down before callable was accepted".into());
+                    }
+                    error => return Err(error.into()),
                 }
-                // Notifications are hints. Always retry admission after one.
-                changes.changed().await?;
             }
-            Err(SubmissionError::Shutdown) => {
-                return Err("service shut down before callable was accepted".into());
-            }
-            Err(error) => return Err(error.into()),
         }
     };
 
     assert_eq!(result, 42);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     blocker.await?;
-    assert!(callable.lock().expect("callable mutex poisoned").is_none());
+    assert!(callable.is_none());
     service.shutdown();
     service.await_termination().await;
     Ok(())
@@ -234,7 +249,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 
 use qubit_executor::service::SubmissionError;
 use qubit_tokio_executor::TokioIoExecutorService;
@@ -255,60 +269,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     started_rx.await?;
 
-    // This future is deliberately neither Clone nor Unpin. Saturated attempts
-    // drop only their wrapper and leave the future in this ownership slot.
+    // Keep the original pinned, non-Clone future until admission succeeds.
     let calls = Arc::new(AtomicUsize::new(0));
     let future_calls = Arc::clone(&calls);
-    let original: Pin<Box<dyn Future<Output = Result<usize, io::Error>> + Send>> =
-        Box::pin(async move {
+    let mut future: Option<Pin<Box<dyn Future<Output = Result<usize, io::Error>> + Send>>> =
+        Some(Box::pin(async move {
             future_calls.fetch_add(1, Ordering::SeqCst);
             Ok(40 + 2)
-        });
-    let future = Arc::new(Mutex::new(Some(original)));
+        }));
     let mut release_tx = Some(release_tx);
     let mut changes = service.capacity_changes();
     let mut blocker_released = false;
     let mut saturated_attempts = 0;
     let result = loop {
-        let future = Arc::clone(&future);
-        let attempt = service.spawn(async move {
-            let mut original = future
-                .lock()
-                .expect("future mutex poisoned")
-                .take()
-                .expect("accepted wrapper is polled once");
-            // Never hold the synchronous mutex across an await point.
-            (&mut original).await
-        });
-
-        match attempt {
+        let task = future.take().expect("rejected future is restored");
+        match service.try_spawn(task) {
             Ok(handle) => {
                 assert_eq!(saturated_attempts, 1, "first attempt must be saturated");
                 break handle.await?;
             }
-            Err(SubmissionError::Saturated) => {
-                saturated_attempts += 1;
-                if !blocker_released {
-                    release_tx
-                        .take()
-                        .expect("release sender is available")
-                        .send(())
-                        .map_err(|_| "blocker stopped before release")?;
-                    blocker_released = true;
+            Err(rejected) => {
+                let (reason, task) = rejected.into_parts();
+                future = Some(task);
+                match reason {
+                    SubmissionError::Saturated => {
+                        saturated_attempts += 1;
+                        if !blocker_released {
+                            release_tx
+                                .take()
+                                .expect("release sender is available")
+                                .send(())
+                                .map_err(|_| "blocker stopped before release")?;
+                            blocker_released = true;
+                        }
+                        changes.changed().await?;
+                    }
+                    SubmissionError::Shutdown => {
+                        return Err("service shut down before future was accepted".into());
+                    }
+                    error => return Err(error.into()),
                 }
-                changes.changed().await?;
             }
-            Err(SubmissionError::Shutdown) => {
-                return Err("service shut down before future was accepted".into());
-            }
-            Err(error) => return Err(error.into()),
         }
     };
 
     assert_eq!(result, 42);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     blocker.await?;
-    assert!(future.lock().expect("future mutex poisoned").is_none());
+    assert!(future.is_none());
     service.shutdown();
     service.await_termination().await;
     Ok(())
@@ -363,6 +371,11 @@ result-observation endpoint.
 accepted task can still return its own error, and an async task can report a
 cancellation or panic through its final task result.
 
+The `try_*` methods return `RejectedTask<T>` when admission fails. Inspect
+`reason()` and use `into_parts()` if the task should be retained or retried.
+The older `submit_*` methods keep their existing `SubmissionError` result and
+consume rejected tasks.
+
 `stop` returns a `StopReport`. For the blocking service, `cancelled` counts only
 queued tasks successfully cancelled before their closure started; active blocking
 closures remain running until they return. For the IO service, `cancelled` counts
@@ -373,15 +386,19 @@ async tasks whose Tokio abort handle was signalled.
 | Symptom | Check | Resolution |
 | --- | --- | --- |
 | Submission is rejected | The service may be shut down (`Shutdown`) or at capacity (`Saturated`) | For saturation, subscribe before submitting, wait for a change, then retry. |
+| An accepted IO task does not run | The bound current-thread runtime may be idle | Drive that runtime with its owner’s `Runtime::block_on`; awaiting from another runtime is not a driver. |
+| The service remains active after `stop` | Tokio may not have processed task aborts yet | Keep the bound runtime driven while awaiting service termination. |
 | Async work stalls other tasks | A blocking operation may be inside an IO future | Move that operation to `TokioExecutorService`. |
 | Blocking service does not terminate | A blocking closure may already be running | Let the closure return; Tokio cannot forcibly abort it. |
 | Cancellation did not determine the final result | Completion and cancellation can race | Await the returned handle. |
 
 ## Limitations and Best Practices
 
-Keep the bound runtime alive until all desired work is complete. Do not treat
-acceptance as task success. Choose the execution domain from the work's blocking
-behavior, and use graceful `shutdown` when accepted tasks should finish.
+Keep the bound runtime alive and driven until all desired work is complete. Do
+not block its driver thread waiting synchronously for tasks that need that
+thread to run. Do not treat acceptance as task success. Choose the execution
+domain from the work's blocking behavior, and use graceful `shutdown` when
+accepted tasks should finish.
 `TokioExecutor` is available for strategy-level blocking execution, but use the
 service types when you need lifecycle and task accounting.
 
