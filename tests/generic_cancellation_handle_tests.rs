@@ -59,9 +59,7 @@ fn test_generic_cancellation_releases_queued_blocking_task_capacity() {
         let (blocker_started_tx, blocker_started_rx) = tokio::sync::oneshot::channel();
         let (release_blocker_tx, release_blocker_rx) = mpsc::channel();
         let blocker = runtime.spawn_blocking(move || {
-            blocker_started_tx
-                .send(())
-                .expect("blocker start should be observed");
+            blocker_started_tx.send(()).expect("blocker start should be observed");
             release_blocker_rx
                 .recv_timeout(Duration::from_secs(10))
                 .expect("blocker should be released within ten seconds");
@@ -88,9 +86,7 @@ fn test_generic_cancellation_releases_queued_blocking_task_capacity() {
             .submit_tracked_callable(|| Ok::<usize, io::Error>(42))
             .expect("cancellation should release service capacity");
 
-        release_blocker_tx
-            .send(())
-            .expect("blocking worker should be released");
+        release_blocker_tx.send(()).expect("blocking worker should be released");
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(2), replacement)
                 .await
