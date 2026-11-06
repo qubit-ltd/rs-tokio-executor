@@ -170,7 +170,7 @@ impl TokioExecutorServiceState {
     }
 
     /// Publishes a task-capacity or lifecycle change.
-    fn notify_capacity_changed(&self) {
+    pub(crate) fn notify_capacity_changed(&self) {
         self.capacity_tx
             .send_modify(|generation| *generation = generation.wrapping_add(1));
     }
@@ -365,14 +365,18 @@ impl TokioExecutorServiceState {
     }
 
     /// Marks the service as shutting down.
+    ///
+    /// The caller publishes the lifecycle change after releasing the
+    /// submission lock so registered capacity Wakers may safely reenter.
     pub(crate) fn shutdown(&self) {
         executor_service_lifecycle_bits::shutdown(&self.lifecycle);
-        self.notify_capacity_changed();
     }
 
     /// Marks the service as stopping.
+    ///
+    /// The caller publishes the lifecycle change after releasing the
+    /// submission lock so registered capacity Wakers may safely reenter.
     pub(crate) fn stop(&self) {
         executor_service_lifecycle_bits::stop(&self.lifecycle);
-        self.notify_capacity_changed();
     }
 }

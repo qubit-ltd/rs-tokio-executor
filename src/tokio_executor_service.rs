@@ -490,8 +490,11 @@ impl ExecutorService for TokioExecutorService {
     /// Already accepted tasks are allowed to finish unless they are cancelled
     /// before their blocking closure starts.
     fn shutdown(&self) {
-        let _guard = self.state.lock_submission();
-        self.state.shutdown();
+        {
+            let _guard = self.state.lock_submission();
+            self.state.shutdown();
+        }
+        self.state.notify_capacity_changed();
         self.state.notify_if_terminated();
     }
 
@@ -507,10 +510,13 @@ impl ExecutorService for TokioExecutorService {
     /// stop was requested, plus the number of queued blocking tasks that were
     /// actually cancelled before their blocking closures started.
     fn stop(&self) -> StopReport {
-        let _guard = self.state.lock_submission();
-        self.state.stop();
-        let (queued_count, running_count) = self.state.task_count_snapshot();
+        let (queued_count, running_count) = {
+            let _guard = self.state.lock_submission();
+            self.state.stop();
+            self.state.task_count_snapshot()
+        };
         let cancellation_count = self.state.abort_tracked_tasks();
+        self.state.notify_capacity_changed();
         self.state.notify_if_terminated();
         StopReport::new(queued_count, running_count, cancellation_count)
     }

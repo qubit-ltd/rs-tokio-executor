@@ -233,8 +233,12 @@ impl TokioIoExecutorService {
     /// Already accepted tasks are allowed to finish unless aborted through
     /// their handles or by [`Self::stop`].
     pub fn shutdown(&self) {
-        let _guard = self.state.lock_submission();
-        self.state.shutdown();
+        {
+            let _guard = self.state.lock_submission();
+            self.state.shutdown();
+        }
+        self.state.notify_capacity_changed();
+        self.state.notify_termination_waiters();
     }
 
     /// Stops accepting new tasks and aborts tracked async tasks.
@@ -245,10 +249,14 @@ impl TokioIoExecutorService {
     /// the number of Tokio abort handles signalled.
     #[must_use]
     pub fn stop(&self) -> StopReport {
-        let _guard = self.state.lock_submission();
-        self.state.stop();
-        let running = self.state.active_tasks.get();
+        let running = {
+            let _guard = self.state.lock_submission();
+            self.state.stop();
+            self.state.active_tasks.get()
+        };
         let cancellation_count = self.state.abort_tracked_tasks();
+        self.state.notify_capacity_changed();
+        self.state.notify_termination_waiters();
         StopReport::new(0, running, cancellation_count)
     }
 

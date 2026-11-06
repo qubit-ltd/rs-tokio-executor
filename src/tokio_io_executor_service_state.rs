@@ -217,17 +217,19 @@ impl TokioIoExecutorServiceState {
     }
 
     /// Marks the service as shutting down.
+    ///
+    /// The caller publishes lifecycle and termination notifications after
+    /// releasing the submission lock so registered Wakers may safely reenter.
     pub(crate) fn shutdown(&self) {
         executor_service_lifecycle_bits::shutdown(&self.lifecycle);
-        self.notify_capacity_changed();
-        self.termination_notify.notify_waiters();
     }
 
     /// Marks the service as stopping.
+    ///
+    /// The caller publishes lifecycle and termination notifications after
+    /// releasing the submission lock so registered Wakers may safely reenter.
     pub(crate) fn stop(&self) {
         executor_service_lifecycle_bits::stop(&self.lifecycle);
-        self.notify_capacity_changed();
-        self.termination_notify.notify_waiters();
     }
 
     /// Wakes async waiters after a task or lifecycle transition changes.
