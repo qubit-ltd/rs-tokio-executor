@@ -9,9 +9,15 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Child;
 use std::process::Command;
+use std::process::ExitStatus;
+use std::process::Stdio;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -23,6 +29,73 @@ const DOCUMENTS: [&str; 4] = [
 ];
 
 static TEMP_ID: AtomicUsize = AtomicUsize::new(0);
+const CHILD_MODE: &str = "QUBIT_DOC_EXAMPLE_WATCHDOG_CHILD";
+const RUN_TIMEOUT: Duration = Duration::from_secs(30);
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+struct CapturedOutput {
+    status: Option<ExitStatus>,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    timed_out: bool,
+}
+
+struct ChildGuard(Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+fn run_with_watchdog(mut command: Command, timeout: Duration, label: &str) -> Result<CapturedOutput, String> {
+    let logs = TempDir::new("watchdog-logs");
+    let stdout_path = logs.0.join("stdout");
+    let stderr_path = logs.0.join("stderr");
+    let stdout_file = fs::File::create(&stdout_path).map_err(|error| format!("create stdout log: {error}"))?;
+    let stderr_file = fs::File::create(&stderr_path).map_err(|error| format!("create stderr log: {error}"))?;
+    command
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file));
+    let child = command.spawn().map_err(|error| format!("spawn {label}: {error}"))?;
+    let mut child = ChildGuard(child);
+    let deadline = Instant::now() + timeout;
+    let (status, timed_out) = loop {
+        match child.0.try_wait() {
+            Ok(Some(status)) => break (Some(status), false),
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
+            Ok(None) => {
+                let _ = child.0.kill();
+                break (child.0.wait().ok(), true);
+            }
+            Err(error) => return Err(format!("poll {label}: {error}")),
+        }
+    };
+    let stdout = fs::read(&stdout_path).map_err(|error| format!("read stdout log: {error}"))?;
+    let stderr = fs::read(&stderr_path).map_err(|error| format!("read stderr log: {error}"))?;
+    Ok(CapturedOutput {
+        status,
+        stdout,
+        stderr,
+        timed_out,
+    })
+}
+
+fn output_diagnostic(program: &CodeBlock, name: &str, result: &CapturedOutput, timeout: Duration) -> String {
+    format!(
+        "{}:{}-{} ({name}) {} after {timeout:?}; status={:?}; stdout:\n{}\nstderr:\n{}",
+        program.document,
+        program.start_line,
+        program.end_line,
+        if result.timed_out { "timed out" } else { "failed" },
+        result.status.and_then(|status| status.code()),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr),
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Dependency {
@@ -484,30 +557,119 @@ fn test_documentation_programs_compile_and_run_in_a_standalone_consumer() {
     let manifest = cargo_consumer_manifest("tokio-executor-doc-examples", &dependencies, &root, &programs);
     fs::write(temporary.0.join("Cargo.toml"), manifest).expect("consumer manifest should be written");
     let target = temporary.0.join("target");
+    let build = Command::new("cargo")
+        .arg("build")
+        .arg("--bins")
+        .arg("--manifest-path")
+        .arg(temporary.0.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", &target)
+        .current_dir(&temporary.0)
+        .output()
+        .expect("cargo build should start");
+    assert!(
+        build.status.success(),
+        "consumer build failed ({:?}):\nstdout:\n{}\nstderr:\n{}",
+        build.status.code(),
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
     for (index, program) in programs.iter().enumerate() {
         let name = format!("doc_example_{index}");
-        let output = Command::new("cargo")
-            .arg("run")
-            .arg("--quiet")
-            .arg("--manifest-path")
-            .arg(temporary.0.join("Cargo.toml"))
-            .arg("--bin")
-            .arg(&name)
-            .env("CARGO_TARGET_DIR", &target)
-            .current_dir(&temporary.0)
-            .output()
-            .unwrap_or_else(|error| panic!("failed to run cargo for {}: {error}", program.document));
+        let executable = target
+            .join("debug")
+            .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        let result = run_with_watchdog(Command::new(executable), RUN_TIMEOUT, &name)
+            .unwrap_or_else(|error| panic!("{}:{} ({name}): {error}", program.document, program.start_line));
         assert!(
-            output.status.success(),
-            "{}:{}-{} failed to compile/run ({:?}):\nstdout:\n{}\nstderr:\n{}",
-            program.document,
-            program.start_line,
-            program.end_line,
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
+            !result.timed_out && result.status.is_some_and(|status| status.success()),
+            "{}",
+            output_diagnostic(program, &name, &result, RUN_TIMEOUT)
         );
     }
+}
+
+#[test]
+fn test_document_example_watchdog_child() {
+    let Ok(mode) = std::env::var(CHILD_MODE) else {
+        return;
+    };
+    let ready = PathBuf::from(std::env::var_os("QUBIT_DOC_EXAMPLE_WATCHDOG_READY").expect("ready marker path"));
+    fs::write(ready, "ready").expect("child should signal startup");
+    match mode.as_str() {
+        "success" => println!("child success"),
+        "failure" => {
+            eprintln!("child failure output");
+            std::process::exit(17);
+        }
+        "hang" => loop {
+            thread::park_timeout(Duration::from_secs(1));
+        },
+        "large-output" => {
+            print!("{}", "o".repeat(256 * 1024));
+            eprint!("{}", "e".repeat(256 * 1024));
+        }
+        other => panic!("unknown child mode: {other}"),
+    }
+}
+
+#[test]
+fn test_document_example_watchdog_handles_exit_output_and_hang() {
+    let program = CodeBlock {
+        document: "watchdog-test.md".to_owned(),
+        start_line: 12,
+        end_line: 14,
+        source: String::new(),
+    };
+    for (mode, expected_code) in [("success", Some(0)), ("failure", Some(17)), ("large-output", Some(0))] {
+        let ready_dir = TempDir::new("watchdog-ready");
+        let ready = ready_dir.0.join("ready");
+        let mut command = Command::new(std::env::current_exe().expect("test executable path"));
+        command
+            .args(["--exact", "test_document_example_watchdog_child", "--nocapture"])
+            .env(CHILD_MODE, mode)
+            .env("QUBIT_DOC_EXAMPLE_WATCHDOG_READY", &ready);
+        let result = run_with_watchdog(command, Duration::from_secs(5), mode).expect("child should run");
+        assert!(
+            !result.timed_out,
+            "{}",
+            output_diagnostic(&program, mode, &result, Duration::from_secs(5))
+        );
+        assert_eq!(result.status.and_then(|status| status.code()), expected_code);
+        assert!(ready.exists(), "child startup handshake should be present");
+        if mode == "success" {
+            assert!(String::from_utf8_lossy(&result.stdout).contains("child success"));
+        }
+        if mode == "failure" {
+            assert!(String::from_utf8_lossy(&result.stderr).contains("child failure output"));
+        }
+        if mode == "large-output" {
+            assert!(result.stdout.len() > 128 * 1024 && result.stderr.len() > 128 * 1024);
+        }
+    }
+
+    let ready_dir = TempDir::new("watchdog-hang-ready");
+    let ready = ready_dir.0.join("ready");
+    let mut command = Command::new(std::env::current_exe().expect("test executable path"));
+    command
+        .args(["--exact", "test_document_example_watchdog_child", "--nocapture"])
+        .env(CHILD_MODE, "hang")
+        .env("QUBIT_DOC_EXAMPLE_WATCHDOG_READY", &ready);
+    let worker = thread::spawn(move || run_with_watchdog(command, Duration::from_secs(2), "hang"));
+    let handshake_deadline = Instant::now() + Duration::from_secs(5);
+    while !ready.exists() && Instant::now() < handshake_deadline {
+        thread::sleep(POLL_INTERVAL);
+    }
+    assert!(ready.exists(), "hanging child should reach startup handshake");
+    let result = worker
+        .join()
+        .expect("watchdog worker should finish")
+        .expect("child should launch");
+    assert!(
+        result.timed_out,
+        "{}",
+        output_diagnostic(&program, "hang", &result, Duration::from_secs(2))
+    );
+    assert!(result.status.is_some(), "timed-out child should be waited/reaped");
 }
 
 #[test]
