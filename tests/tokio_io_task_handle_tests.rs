@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::io;
+use std::time::Duration;
 
 use qubit_executor::CancelResult;
 use qubit_executor::TaskExecutionError;
@@ -16,15 +17,17 @@ async fn test_tokio_io_task_handle_cancel_requests_abort() {
     let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
 
     let handle = service
-        .spawn(async {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            Ok::<(), io::Error>(())
-        })
+        .spawn(async { std::future::pending::<Result<(), io::Error>>().await })
         .expect("service should accept task");
 
     assert_eq!(CancelResult::Cancelled, handle.cancel());
-    tokio::task::yield_now().await;
-    assert!(handle.is_done());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !handle.is_done() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelled task should finish promptly");
     assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
     service.shutdown();
     assert!(service.is_terminated());

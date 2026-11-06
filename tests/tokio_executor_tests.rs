@@ -8,6 +8,7 @@
 //! Tests for [`TokioExecutor`](qubit_tokio_executor::TokioExecutor).
 
 use std::io;
+use std::sync::Mutex;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -53,16 +54,41 @@ fn test_tokio_executor_call_uses_explicit_runtime_handle() {
 #[tokio::test]
 async fn test_tokio_executor_tracked_task_is_done_reports_completion() {
     let executor = TokioExecutor::new(tokio::runtime::Handle::current());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let started_tx = Mutex::new(Some(started_tx));
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Mutex::new(release_rx);
 
     let task = executor
-        .call(|| {
-            std::thread::sleep(Duration::from_millis(25));
+        .call(move || {
+            let _ = started_tx
+                .lock()
+                .expect("started sender mutex should not be poisoned")
+                .take()
+                .expect("started sender should be available")
+                .send(());
+            // Dropping release_tx also unblocks the closure if an assertion fails.
+            let _ = release_rx
+                .lock()
+                .expect("release receiver mutex should not be poisoned")
+                .recv();
             Ok::<usize, io::Error>(42)
         })
         .expect("tokio executor should accept callable");
 
+    tokio::time::timeout(Duration::from_secs(5), started_rx)
+        .await
+        .expect("blocking task should start promptly")
+        .expect("blocking task should signal that it started");
     assert!(!task.is_done());
-    assert_eq!(task.await.expect("tokio executor task should complete"), 42);
+    release_tx
+        .send(())
+        .expect("blocking task should receive release signal");
+    let result = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("blocking task should finish promptly")
+        .expect("tokio executor task should complete");
+    assert_eq!(result, 42);
 }
 
 #[test]
