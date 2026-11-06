@@ -9,8 +9,10 @@
 
 use std::io;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use qubit_executor::CancelResult;
@@ -56,12 +58,10 @@ fn test_cancellation_handle_cancels_queued_task_after_into_future_and_releases_c
         let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
         let (release_blocker_tx, release_blocker_rx) = mpsc::channel();
         let blocker = runtime.spawn_blocking(move || {
-            blocker_started_tx
-                .send(())
-                .expect("blocker start should be observed");
+            blocker_started_tx.send(()).expect("blocker start should be observed");
             release_blocker_rx
-                .recv()
-                .expect("blocker should be released");
+                .recv_timeout(Duration::from_secs(10))
+                .expect("blocker should be released within ten seconds");
         });
         blocker_started_rx
             .recv_timeout(Duration::from_secs(2))
@@ -93,9 +93,7 @@ fn test_cancellation_handle_cancels_queued_task_after_into_future_and_releases_c
         let replacement = service
             .submit_tracked_callable(|| Ok::<usize, io::Error>(42))
             .expect("cancellation should eventually release capacity");
-        release_blocker_tx
-            .send(())
-            .expect("worker should be released");
+        release_blocker_tx.send(()).expect("worker should be released");
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(2), replacement)
                 .await
@@ -128,7 +126,9 @@ async fn test_cancellation_handle_does_not_interrupt_running_blocking_task() {
                 .expect("start signal should be available")
                 .send(())
                 .expect("start should be observed");
-            release_rx.recv().expect("running task should be released");
+            release_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("running task should be released within ten seconds");
             Ok::<usize, io::Error>(9)
         })
         .expect("service should accept task");
@@ -139,9 +139,7 @@ async fn test_cancellation_handle_does_not_interrupt_running_blocking_task() {
         .expect("start signal should be sent");
 
     assert_eq!(cancellation.cancel(), CancelResult::AlreadyRunning);
-    release_tx
-        .send(())
-        .expect("running task should be released");
+    release_tx.send(()).expect("running task should be released");
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), task)
             .await
@@ -165,10 +163,10 @@ fn test_dropping_cancellation_handle_does_not_cancel_queued_task() {
         let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = runtime.spawn_blocking(move || {
-            blocker_started_tx
-                .send(())
-                .expect("blocker start should be observed");
-            release_rx.recv().expect("blocker should be released");
+            blocker_started_tx.send(()).expect("blocker start should be observed");
+            release_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("blocker should be released within ten seconds");
         });
         blocker_started_rx
             .recv_timeout(Duration::from_secs(2))
@@ -204,10 +202,10 @@ fn test_cancelled_queued_closure_is_eventually_destroyed() {
         let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let blocker = runtime.spawn_blocking(move || {
-            blocker_started_tx
-                .send(())
-                .expect("blocker start should be observed");
-            release_rx.recv().expect("blocker should be released");
+            blocker_started_tx.send(()).expect("blocker start should be observed");
+            release_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("blocker should be released within ten seconds");
         });
         blocker_started_rx
             .recv_timeout(Duration::from_secs(2))
@@ -217,10 +215,7 @@ fn test_cancelled_queued_closure_is_eventually_destroyed() {
         let drop_signal = std::sync::Mutex::new(Some(DropSignal(Some(dropped_tx))));
         let task = service
             .submit_tracked_callable(move || {
-                let _drop_signal = drop_signal
-                    .lock()
-                    .expect("drop signal lock should not poison")
-                    .take();
+                let _drop_signal = drop_signal.lock().expect("drop signal lock should not poison").take();
                 Ok::<(), io::Error>(())
             })
             .expect("service should accept queued task");

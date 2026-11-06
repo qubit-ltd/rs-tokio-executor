@@ -299,7 +299,7 @@ async fn run_submission_race_with_close(stop: bool) {
     let closer = thread::spawn(move || {
         close_barrier.wait();
         if stop {
-            close_service.stop();
+            let _ = close_service.stop();
         } else {
             close_service.shutdown();
         }

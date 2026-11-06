@@ -98,7 +98,7 @@ impl<R, E> TokioTaskHandle<R, E> {
     /// [`CancelResult::Cancelled`] when an abort request was sent, or
     /// [`CancelResult::AlreadyFinished`] if the Tokio task had already
     /// completed.
-    #[must_use]
+    #[must_use = "inspect the cancellation outcome"]
     #[inline]
     pub fn cancel(&self) -> CancelResult {
         if self.handle.is_finished() {

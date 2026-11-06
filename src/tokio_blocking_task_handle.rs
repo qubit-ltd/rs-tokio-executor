@@ -102,11 +102,7 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// * `F` - Callback type used to finish queued-task accounting.
     #[must_use]
     #[inline]
-    pub(crate) fn new<F>(
-        handle: TrackedTask<R, E>,
-        abort_handle: AbortHandle,
-        cancel_queued_task: F,
-    ) -> Self
+    pub(crate) fn new<F>(handle: TrackedTask<R, E>, abort_handle: AbortHandle, cancel_queued_task: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
@@ -185,14 +181,10 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
     /// # Returns
     ///
     /// The observed cancellation outcome.
-    #[must_use]
+    #[must_use = "inspect the cancellation outcome"]
     #[inline]
     pub fn cancel(&self) -> CancelResult {
-        cancel_blocking_task(
-            || self.handle.cancel(),
-            &self.cancel_queued_task,
-            &self.abort_handle,
-        )
+        cancel_blocking_task(|| self.handle.cancel(), &self.cancel_queued_task, &self.abort_handle)
     }
 
     /// Returns a cancellation endpoint that remains usable after this handle
@@ -226,6 +218,17 @@ impl<R, E> TokioBlockingTaskHandle<R, E> {
 /// Completes the provider-specific part of cancellation when the task state
 /// accepts the cancellation request. Keep callback-before-abort ordering to
 /// preserve the existing panic and accounting semantics.
+///
+/// # Parameters
+///
+/// * `cancel` - Attempts the shared task-state cancellation transition.
+/// * `cancel_queued_task` - Updates service accounting for a cancelled queued
+///   task.
+/// * `abort_handle` - Requests Tokio to abort the queued blocking closure.
+///
+/// # Returns
+///
+/// The cancellation outcome reported by the shared task state.
 fn cancel_blocking_task(
     cancel: impl FnOnce() -> CancelResult,
     cancel_queued_task: &CancelQueuedTask,
