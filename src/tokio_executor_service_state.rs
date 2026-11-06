@@ -25,64 +25,13 @@ use crate::executor_service_lifecycle_bits;
 use crate::tokio_task_registration::TokioTaskRegistration;
 use crate::tokio_task_registration::key;
 
+mod internal;
+
+use internal::TokioExecutorTaskCounts;
+use internal::TrackedAbortHandle;
+
 /// Maximum number of accepted unfinished blocking tasks by default.
 const DEFAULT_TASK_CAPACITY: usize = 1024;
-
-/// Abort handle tracked with a service-local task marker.
-struct TrackedAbortHandle {
-    /// Marker shared with the lifecycle guard for the same task.
-    _marker: Arc<TokioTaskRegistration>,
-    /// Tokio abort handle used by immediate shutdown.
-    handle: AbortHandle,
-    /// Completion hook used to publish cancellation for result handles.
-    ///
-    /// The hook returns `true` only when queued-task accounting was actually
-    /// cancelled by the call.
-    cancel: Box<dyn FnOnce() -> bool + Send + 'static>,
-}
-
-/// Number of accepted blocking tasks by scheduler state.
-#[derive(Default)]
-struct TokioExecutorTaskCounts {
-    /// Tasks submitted to Tokio but whose blocking closure has not started.
-    queued: usize,
-    /// Tasks whose blocking closure has started and not yet finished.
-    running: usize,
-}
-
-impl TokioExecutorTaskCounts {
-    /// Records a newly accepted task as queued.
-    fn accept_task(&mut self) {
-        self.queued += 1;
-    }
-
-    /// Moves one accepted task from queued to running.
-    fn mark_started(&mut self) {
-        debug_assert!(self.queued > 0);
-        self.queued = self.queued.saturating_sub(1);
-        self.running += 1;
-    }
-
-    /// Records task completion from either the queued or running state.
-    ///
-    /// # Parameters
-    ///
-    /// * `started` - Whether the task had already moved to running.
-    fn finish_task(&mut self, started: bool) {
-        if started {
-            debug_assert!(self.running > 0);
-            self.running = self.running.saturating_sub(1);
-        } else {
-            debug_assert!(self.queued > 0);
-            self.queued = self.queued.saturating_sub(1);
-        }
-    }
-
-    /// Returns whether no accepted task remains active.
-    fn is_empty(&self) -> bool {
-        self.queued == 0 && self.running == 0
-    }
-}
 
 /// Shared state for [`crate::TokioExecutorService`].
 pub(crate) struct TokioExecutorServiceState {

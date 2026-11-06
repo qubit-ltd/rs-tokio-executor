@@ -24,16 +24,12 @@ use crate::executor_service_lifecycle_bits;
 use crate::tokio_task_registration::TokioTaskRegistration;
 use crate::tokio_task_registration::key;
 
+mod internal;
+
+use internal::TrackedAbortHandle;
+
 /// Maximum number of accepted unfinished async tasks by default.
 const DEFAULT_TASK_CAPACITY: usize = 1024;
-
-/// Abort handle tracked with a service-local task marker.
-struct TrackedAbortHandle {
-    /// Marker shared with the lifecycle guard for the same task.
-    _marker: Arc<TokioTaskRegistration>,
-    /// Tokio abort handle used by immediate shutdown.
-    handle: AbortHandle,
-}
 
 /// Shared state for [`crate::TokioIoExecutorService`].
 pub(crate) struct TokioIoExecutorServiceState {
