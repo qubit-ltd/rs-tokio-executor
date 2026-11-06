@@ -17,6 +17,7 @@ use crate::RejectedTask;
 use crate::TokioIoExecutorServiceStats;
 use crate::TokioTaskHandle;
 use crate::internal::tokio_guarded_io_future::TokioGuardedIoFuture;
+use crate::internal::tokio_io_spawn_handoff::TokioIoSpawnHandoff;
 use crate::tokio_io_executor_service_state::TokioIoExecutorServiceState;
 use crate::tokio_io_service_task_guard::TokioIoServiceTaskGuard;
 use crate::tokio_task_registration::TokioTaskRegistration;
@@ -174,32 +175,57 @@ impl TokioIoExecutorService {
         R: Send + 'static,
         E: Send + 'static,
     {
-        let (handle, sender, guard) = {
-            let _admission = self.state.lock_submission();
-            if self.state.is_not_running() {
-                return Err(RejectedTask::new(SubmissionError::Shutdown, future));
-            }
-            if !self.state.try_accept_task() {
-                return Err(RejectedTask::new(SubmissionError::Saturated, future));
-            }
-            let marker = TokioTaskRegistration::new();
-            let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
-            let (sender, receiver) = tokio::sync::oneshot::channel::<TokioGuardedIoFuture<F>>();
-            let handle = self.runtime.spawn(async move {
-                match receiver.await {
-                    Ok(future) => future.await,
-                    Err(_) => Err(qubit_executor::TaskExecutionError::Cancelled),
-                }
-            });
-            self.state.register_abort_handle(marker, handle.abort_handle());
-            (handle, sender, guard)
-        };
+        self.prepare_spawn(future)
+            .map(TokioIoSpawnHandoff::deliver)
+            .map_err(|(reason, future)| RejectedTask::new(reason, future))
+    }
 
-        let payload = TokioGuardedIoFuture::new(future, guard);
-        if let Err(payload) = sender.send(payload) {
-            drop(payload);
+    /// Registers a receiver-only Tokio task while keeping the user future
+    /// outside the admission critical section.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - The future to retain for delivery after admission.
+    /// * `R` - The future's result type.
+    /// * `E` - The future's error type.
+    ///
+    /// # Parameters
+    ///
+    /// * `future` - The user future retained by the returned handoff.
+    ///
+    /// # Returns
+    ///
+    /// A registered handoff that can deliver the future after this method
+    /// releases admission.
+    ///
+    /// # Errors
+    ///
+    /// Returns the submission error and original future if admission is
+    /// rejected.
+    pub(crate) fn prepare_spawn<F, R, E>(&self, future: F) -> Result<TokioIoSpawnHandoff<F, R, E>, (SubmissionError, F)>
+    where
+        F: Future<Output = Result<R, E>> + Send + 'static,
+        R: Send + 'static,
+        E: Send + 'static,
+    {
+        let _admission = self.state.lock_submission();
+        if self.state.is_not_running() {
+            return Err((SubmissionError::Shutdown, future));
         }
-        Ok(TokioTaskHandle::new(handle))
+        if !self.state.try_accept_task() {
+            return Err((SubmissionError::Saturated, future));
+        }
+        let marker = TokioTaskRegistration::new();
+        let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
+        let (sender, receiver) = tokio::sync::oneshot::channel::<TokioGuardedIoFuture<F>>();
+        let handle = self.runtime.spawn(async move {
+            match receiver.await {
+                Ok(future) => future.await,
+                Err(_) => Err(qubit_executor::TaskExecutionError::Cancelled),
+            }
+        });
+        self.state.register_abort_handle(marker, handle.abort_handle());
+        Ok(TokioIoSpawnHandoff::new(future, handle, sender, guard))
     }
 
     /// Stops accepting new async tasks.
