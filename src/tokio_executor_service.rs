@@ -476,6 +476,10 @@ impl ExecutorService for TokioExecutorService {
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
     /// requested before the task is accepted, or [`SubmissionError::Saturated`]
     /// if the unfinished-task capacity is full. Shutdown is checked first.
+    /// These errors describe this service's admission state; they do not
+    /// probe whether the bound Tokio runtime is alive. A task accepted while
+    /// the runtime is closed may be dropped before its runner starts, which
+    /// is observed through its task handle as `Dropped`.
     ///
     /// # Type Parameters
     ///
