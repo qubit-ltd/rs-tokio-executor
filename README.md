@@ -26,7 +26,8 @@ application's `tokio::runtime::Handle`, and keep that runtime alive while work
 may run. A handle does not drive the runtime: a current-thread runtime advances
 only while its owner calls `Runtime::block_on`. Awaiting a task handle from a
 different runtime does not drive the bound runtime, and `stop` cleanup also
-needs that runtime to make progress. See the [runtime guidance](doc/user_guide.md#runtime-lifetime-and-driver-progress).
+needs that runtime to make progress. Submission errors reflect service
+admission rather than runtime liveness; see the [diagnostics guide](doc/user_guide.md#errors-and-diagnostics).
 
 ## Quick Start
 

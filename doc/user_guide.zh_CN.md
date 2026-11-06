@@ -306,6 +306,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `SubmissionError::Shutdown` 表示服务不再接收任务；`SubmissionError::Saturated` 表示未完成任务容量已满。多个调用方协作时，可通过 `is_running`、`is_not_running` 或 `lifecycle` 检查服务状态。两个服务接受任务后，任务本身仍可能返回业务错误；异步任务还可能在最终结果中报告取消或 panic。
 
+提交错误描述的是服务准入状态，不是 Tokio runtime 是否存活。`TokioExecutor::call` 不会因绑定的 runtime 已关闭而返回 `SubmissionError::Shutdown`。阻塞任务仍可能被接受；若 Tokio 在 runner 启动前销毁任务，句柄会报告 `Dropped`。服务自身调用 `shutdown` 或 `stop` 后会拒绝新任务；若 runtime 独立关闭，服务的准入判断不会因此改变。runtime 关闭后接受的 IO 任务若被 Tokio 销毁，句柄可能报告 `Cancelled`。关闭竞态可能产生不同的最终结果，应以返回句柄观察到的结果为准。
+
+| 情况 | 提交结果 | 观察结果 |
+| --- | --- | --- |
+| 服务已关闭 | `Shutdown` | 任务未被接受。 |
+| 服务仍在运行但容量已满 | `Saturated` | 任务未被接受；可保留任务并重试。 |
+| runtime 已关闭，提交阻塞任务 | 已接受（`Ok(handle)`） | 在 Tokio 于 runner 启动前销毁任务的已覆盖场景中，句柄报告 `Dropped`。 |
+| runtime 已关闭，提交 IO 任务 | 已接受（`Ok(handle)`） | 在 Tokio 销毁任务的已覆盖场景中，句柄报告 `Cancelled`。 |
+
+runtime 关闭的表格场景来自已有回归测试，并不代表每种关闭竞态都只有这一种结果。已经启动的阻塞任务可以继续执行直至返回；应以句柄的最终结果为准。
+
 使用 `try_*` 方法时，准入失败会返回 `RejectedTask<T>`。可先通过 `reason()` 查看拒绝原因，再用 `into_parts()` 取回任务并决定是否重试。旧的 `submit_*` 方法仍返回 `SubmissionError`，并保持拒绝时消费任务的行为。
 
 `stop` 会返回 `StopReport`。阻塞服务的 `cancelled` 只统计闭包开始前真正取消成功的排队任务；已经开始的阻塞闭包会继续运行，直至自行返回。IO 服务的 `cancelled` 则统计已经向 Tokio abort handle 发出请求的异步任务数。
@@ -315,6 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 现象 | 检查项 | 处理方式 |
 | --- | --- | --- |
 | 提交被拒绝 | `Shutdown` 表示已关闭，`Saturated` 表示容量已满 | 容量已满时，先订阅容量变化，等待通知后重试。 |
+| 绑定的 runtime 关闭后仍接受了任务 | 提交检查服务准入，不探测 runtime 是否存活 | 检查返回句柄；若 Tokio 在执行前销毁任务，阻塞任务可能为 `Dropped`，IO 任务可能为 `Cancelled`。 |
 | 已接受的 IO 任务没有运行 | 绑定的 current-thread runtime 可能没有被驱动 | 由 runtime 所有者调用 `Runtime::block_on`；在另一个 runtime 中 await 任务句柄不会驱动它。 |
 | `stop` 后服务一直未终止 | Tokio 可能还没有处理任务的 abort 请求 | 保持绑定 runtime 有机会运行，并在该 runtime 上等待服务终止。 |
 | 异步任务拖慢其他任务 | IO future 中可能执行了阻塞操作 | 将阻塞操作移交给 `TokioExecutorService`。 |

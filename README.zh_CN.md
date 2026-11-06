@@ -22,8 +22,8 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
 `tokio::runtime::Handle` 构造服务，并让 runtime 持续运行到所有已提交任务结束。
 `Handle` 不会驱动 runtime：current-thread runtime 只有在持有它的线程调用
 `Runtime::block_on` 时才会推进。若在另一个 runtime 中等待任务句柄，也不会替绑定的
-runtime 执行任务；`stop` 后的清理同样需要绑定 runtime 获得运行机会。更多说明见
-[运行时指南](doc/user_guide.zh_CN.md#运行时存活与驱动推进)。
+runtime 执行任务；`stop` 后的清理同样需要绑定 runtime 获得运行机会。提交错误描述服务准入，
+不会探测 runtime 是否存活；详见[错误诊断指南](doc/user_guide.zh_CN.md#错误与诊断)。
 
 ## 快速开始
 

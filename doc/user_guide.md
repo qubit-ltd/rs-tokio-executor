@@ -382,6 +382,27 @@ result-observation endpoint.
 accepted task can still return its own error, and an async task can report a
 cancellation or panic through its final task result.
 
+Submission errors describe service admission, not Tokio runtime liveness.
+`TokioExecutor::call` does not return `SubmissionError::Shutdown` when its
+bound runtime has closed. A blocking task may still be accepted and its handle
+may report `Dropped` if Tokio discards it before its runner starts. The
+services reject new work after their own `shutdown` or `stop`; a runtime that
+has closed independently does not change that admission decision. For an IO
+task accepted after runtime shutdown, the handle may report `Cancelled` if
+Tokio discards the task. Shutdown races can produce different final outcomes;
+use the returned handle as the authority.
+
+| Situation | Submission result | Observation |
+| --- | --- | --- |
+| The service has shut down | `Shutdown` | The task is not accepted. |
+| The service is running but at capacity | `Saturated` | The task is not accepted; it can be retained and retried. |
+| The runtime is closed and a blocking task is submitted | Accepted (`Ok(handle)`) | In the covered case where Tokio drops it before the runner starts, the handle reports `Dropped`. |
+| The runtime is closed and an IO task is submitted | Accepted (`Ok(handle)`) | In the covered case where Tokio destroys the task, the handle reports `Cancelled`. |
+
+These runtime-shutdown rows describe covered submission scenarios, not the
+only possible outcome of every shutdown race. A blocking task that has started
+can continue until it returns. The final handle result is authoritative.
+
 The `try_*` methods return `RejectedTask<T>` when admission fails. Inspect
 `reason()` and use `into_parts()` if the task should be retained or retried.
 The older `submit_*` methods keep their existing `SubmissionError` result and
@@ -397,6 +418,7 @@ async tasks whose Tokio abort handle was signalled.
 | Symptom | Check | Resolution |
 | --- | --- | --- |
 | Submission is rejected | The service may be shut down (`Shutdown`) or at capacity (`Saturated`) | For saturation, subscribe before submitting, wait for a change, then retry. |
+| A task is accepted after the bound runtime has shut down | Submission checks service admission, not runtime liveness | Inspect the returned handle; a blocking task may be `Dropped` and an IO task may be `Cancelled` if Tokio discards it before execution. |
 | An accepted IO task does not run | The bound current-thread runtime may be idle | Drive that runtime with its owner’s `Runtime::block_on`; awaiting from another runtime is not a driver. |
 | The service remains active after `stop` | Tokio may not have processed task aborts yet | Keep the bound runtime driven while awaiting service termination. |
 | Async work stalls other tasks | A blocking operation may be inside an IO future | Move that operation to `TokioExecutorService`. |

@@ -119,7 +119,11 @@ impl Executor for TokioExecutor {
     ///
     /// # Errors
     ///
-    /// The bound runtime handle determines where the task is submitted.
+    /// This method does not use [`SubmissionError`] to report whether the
+    /// bound runtime is still alive. A call after runtime shutdown can still
+    /// return `Ok(handle)`; if Tokio drops the accepted blocking task before
+    /// its runner executes, observing the handle reports `Dropped`. Runtime
+    /// shutdown races are determined by the final handle result.
     ///
     /// # Type Parameters
     ///

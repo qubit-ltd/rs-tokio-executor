@@ -140,6 +140,11 @@ impl TokioIoExecutorService {
     /// Returns [`SubmissionError::Shutdown`] if shutdown has already been
     /// requested, or [`SubmissionError::Saturated`] if the unfinished-task
     /// capacity is full.
+    /// These errors describe this service's admission state; they do not
+    /// probe whether the bound Tokio runtime is alive. A submission can be
+    /// accepted after runtime shutdown and then be cancelled before its
+    /// future runs; runtime shutdown races are determined by the final handle
+    /// result.
     ///
     /// # Type Parameters
     ///
