@@ -165,6 +165,20 @@ impl TokioIoExecutorService {
     /// A rejected future is returned unchanged; it has not been polled or
     /// dropped. Shutdown is checked before capacity saturation.
     ///
+    /// # Returns
+    ///
+    /// A task handle if the service accepts the future. Acceptance does not
+    /// probe whether the bound Tokio runtime is alive. A future accepted after
+    /// runtime shutdown may be cancelled before it is polled; observe the final
+    /// outcome by awaiting the handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RejectedTask`] containing the original, unpolled future and
+    /// [`SubmissionError::Shutdown`] if admission is closed, or
+    /// [`SubmissionError::Saturated`] if capacity is full. Shutdown is checked
+    /// first.
+    ///
     /// # Type Parameters
     ///
     /// * `F` - The future to submit.

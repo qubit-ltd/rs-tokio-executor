@@ -193,6 +193,19 @@ impl TokioExecutorService {
     /// A rejected runnable is returned unchanged and is neither run nor
     /// dropped. Shutdown is checked before capacity saturation.
     ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the service accepts the runnable. Acceptance does not probe
+    /// runtime liveness; an accepted runnable may be discarded without running
+    /// if the bound runtime is closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RejectedTask`] containing the original runnable and
+    /// [`SubmissionError::Shutdown`] if admission is closed, or
+    /// [`SubmissionError::Saturated`] if capacity is full. Shutdown is checked
+    /// first.
+    ///
     /// # Type Parameters
     ///
     /// * `T` - The runnable to submit.
@@ -211,13 +224,16 @@ impl TokioExecutorService {
             Err(reason) => return Err(RejectedTask::new(reason, task)),
         };
         let abort_queued_task = guard.finish_queued_once_callback();
-        let (_, sender) = self.spawn_accepted_blocking_task(marker, admission, guard, abort_queued_task);
-        if let Err(task) = sender.send(move || {
-            let mut task = task;
-            let runner = TaskRunner::new(move || task.run());
-            let _ = runner.call::<(), E>();
-        }) {
-            drop(task);
+        let (_, sender) = self.spawn_accepted_blocking_task(marker, admission, abort_queued_task);
+        if let Err(payload) = sender.send((
+            move || {
+                let mut task = task;
+                let runner = TaskRunner::new(move || task.run());
+                let _ = runner.call::<(), E>();
+            },
+            guard,
+        )) {
+            drop(payload);
         }
         Ok(())
     }
@@ -227,6 +243,20 @@ impl TokioExecutorService {
     ///
     /// A rejected callable is returned unchanged and has not been called.
     /// Shutdown is checked before capacity saturation.
+    ///
+    /// # Returns
+    ///
+    /// A [`TaskHandle`] if the service accepts the callable. Acceptance does
+    /// not probe runtime liveness. If the bound runtime drops the accepted
+    /// task before its runner starts, the handle reports `Dropped`; observe
+    /// the final handle result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RejectedTask`] containing the original, uncalled callable and
+    /// [`SubmissionError::Shutdown`] if admission is closed, or
+    /// [`SubmissionError::Saturated`] if capacity is full. Shutdown is checked
+    /// first.
     ///
     /// # Type Parameters
     ///
@@ -252,15 +282,18 @@ impl TokioExecutorService {
         let completion = share_task_slot(completion);
         let abort_completion = Arc::clone(&completion);
         let abort_queued_task = guard.finish_queued_once_callback();
-        let (_, sender) = self.spawn_accepted_blocking_task(marker, admission, guard, move || {
+        let (_, sender) = self.spawn_accepted_blocking_task(marker, admission, move || {
             cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task)
         });
-        if let Err(task) = sender.send(move || {
-            if let Some(completion) = take_task_slot(&completion) {
-                TaskRunner::new(task).run(completion);
-            }
-        }) {
-            drop(task);
+        if let Err(payload) = sender.send((
+            move || {
+                if let Some(completion) = take_task_slot(&completion) {
+                    TaskRunner::new(task).run(completion);
+                }
+            },
+            guard,
+        )) {
+            drop(payload);
         }
         Ok(handle)
     }
@@ -269,6 +302,20 @@ impl TokioExecutorService {
     ///
     /// A rejected callable is returned unchanged and has not been called.
     /// Shutdown is checked before capacity saturation.
+    ///
+    /// # Returns
+    ///
+    /// A [`TokioBlockingTaskHandle`] if the service accepts the callable.
+    /// Acceptance does not probe runtime liveness. If the bound runtime
+    /// drops the accepted task before its runner starts, the handle reports
+    /// `Dropped`; observe the final handle result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RejectedTask`] containing the original, uncalled callable and
+    /// [`SubmissionError::Shutdown`] if admission is closed, or
+    /// [`SubmissionError::Saturated`] if capacity is full. Shutdown is checked
+    /// first.
     ///
     /// # Type Parameters
     ///
@@ -298,15 +345,18 @@ impl TokioExecutorService {
         let abort_completion = Arc::clone(&completion);
         let abort_queued_task = guard.finish_queued_once_callback();
         let cancel_queued_task = guard.cancel_queued_callback();
-        let (abort_handle, sender) = self.spawn_accepted_blocking_task(marker, admission, guard, move || {
+        let (abort_handle, sender) = self.spawn_accepted_blocking_task(marker, admission, move || {
             cancel_unstarted_task_slot_if_queued(&abort_completion, abort_queued_task)
         });
-        if let Err(task) = sender.send(move || {
-            if let Some(completion) = take_task_slot(&completion) {
-                TaskRunner::new(task).run(completion);
-            }
-        }) {
-            drop(task);
+        if let Err(payload) = sender.send((
+            move || {
+                if let Some(completion) = take_task_slot(&completion) {
+                    TaskRunner::new(task).run(completion);
+                }
+            },
+            guard,
+        )) {
+            drop(payload);
         }
         Ok(TokioBlockingTaskHandle::new(handle, abort_handle, cancel_queued_task))
     }
@@ -349,26 +399,25 @@ impl TokioExecutorService {
     /// * `marker` - Registration marker for the accepted task.
     /// * `_admission` - Guard that holds admission through spawn and
     ///   registration.
-    /// * `guard` - Lifecycle guard for the accepted task.
     /// * `cancel` - Queued-cancellation hook registered with the service.
     ///
     /// # Returns
     ///
-    /// The registered abort handle and sender used to deliver the user task.
+    /// The registered abort handle and sender used to deliver the user task and
+    /// its lifecycle guard after admission has been released.
     fn spawn_accepted_blocking_task<F, C>(
         &self,
         marker: Arc<TokioTaskRegistration>,
         _admission: MutexGuard<'_, ()>,
-        guard: TokioServiceTaskGuard,
         cancel: C,
-    ) -> (AbortHandle, tokio::sync::oneshot::Sender<F>)
+    ) -> (AbortHandle, tokio::sync::oneshot::Sender<(F, TokioServiceTaskGuard)>)
     where
         F: FnOnce() + Send + 'static,
         C: FnOnce() -> bool + Send + 'static,
     {
-        let (sender, receiver) = tokio::sync::oneshot::channel::<F>();
+        let (sender, receiver) = tokio::sync::oneshot::channel::<(F, TokioServiceTaskGuard)>();
         let join_handle = self.runtime.spawn_blocking(move || {
-            if let Ok(task) = receiver.blocking_recv()
+            if let Ok((task, guard)) = receiver.blocking_recv()
                 && guard.mark_started()
             {
                 task();
@@ -582,5 +631,66 @@ impl TokioExecutorService {
                 notified.set(self.state.terminated_notify.notified());
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use qubit_executor::service::ExecutorService;
+
+    use crate::TokioExecutorService;
+
+    struct DropProbe(mpsc::Sender<()>);
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    #[test]
+    fn test_stop_after_blocking_registration_prevents_handoff_task_from_running() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+        let service = TokioExecutorService::with_task_capacity(
+            runtime.handle().clone(),
+            NonZeroUsize::new(1).expect("capacity should be nonzero"),
+        );
+        let (marker, guard, admission) = service
+            .prepare_blocking_submission()
+            .expect("running service should register a task");
+        let cancel = guard.finish_queued_once_callback();
+        let (_abort_handle, sender) = service.spawn_accepted_blocking_task(marker, admission, cancel);
+        assert_eq!(service.stats().queued + service.stats().running, 1);
+
+        let report = service.stop();
+        assert_eq!(report.cancelled, 1, "stop should find the registered task");
+        assert_eq!(service.stats().queued + service.stats().running, 0);
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_in_task = Arc::clone(&calls);
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let probe = DropProbe(dropped_tx);
+        let task = move || {
+            let _probe = &probe;
+            calls_in_task.fetch_add(1, Ordering::SeqCst);
+        };
+        if let Err(payload) = sender.send((task, guard)) {
+            drop(payload);
+        }
+
+        assert!(service.wait_termination_timeout(Duration::from_secs(2)));
+        dropped_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("handoff payload should eventually be dropped");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "stopped task must not run");
+        assert_eq!(service.stats().queued + service.stats().running, 0);
+        service.shutdown();
     }
 }

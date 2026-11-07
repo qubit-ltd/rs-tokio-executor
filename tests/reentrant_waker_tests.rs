@@ -8,6 +8,7 @@
 use std::future::Future;
 use std::future::IntoFuture;
 use std::io;
+use std::io::Read;
 use std::num::NonZeroUsize;
 use std::process::Command;
 use std::process::Stdio;
@@ -29,6 +30,7 @@ use qubit_tokio_executor::TokioIoExecutorService;
 
 const CHILD_MODE: &str = "QUBIT_REENTRANT_WAKER_CHILD";
 const WATCHDOG_TIMEOUT: Duration = Duration::from_secs(5);
+const CLOSED_RUNTIME_CHILD: &str = "QUBIT_CLOSED_RUNTIME_CAPACITY_CHILD";
 
 struct ReentrantWake {
     invoked: Arc<AtomicBool>,
@@ -292,6 +294,136 @@ fn test_reentrant_waker_watchdog_matrix() {
                         thread::sleep(Duration::from_millis(10));
                     }
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_closed_runtime_capacity_waker_child() {
+    if std::env::var_os(CLOSED_RUNTIME_CHILD).is_none() {
+        return;
+    }
+
+    let submission = std::env::var("QUBIT_CLOSED_RUNTIME_SUBMISSION").expect("submission kind");
+    let reentry = std::env::var("QUBIT_CLOSED_RUNTIME_REENTRY").expect("reentry action");
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let service = TokioExecutorService::new(runtime.handle().clone());
+    drop(runtime);
+
+    let mut changes = service.capacity_changes();
+    let invoked = Arc::new(AtomicBool::new(false));
+    let reentrant_service = service.clone();
+    let waker = Waker::from(Arc::new(ReentrantWake {
+        invoked: Arc::clone(&invoked),
+        reenter: Box::new(move || match reentry.as_str() {
+            "submit" => {
+                let handle = reentrant_service
+                    .try_submit_callable(|| Ok::<(), io::Error>(()))
+                    .expect("reentrant submission should remain admissible");
+                assert!(matches!(handle.get(), Err(qubit_executor::TaskExecutionError::Dropped)));
+            }
+            "shutdown" => reentrant_service.shutdown(),
+            "stop" => drop(reentrant_service.stop()),
+            _ => panic!("unknown reentry action: {reentry}"),
+        }),
+    }));
+    let mut changed = Box::pin(changes.changed());
+    assert!(matches!(
+        changed.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+
+    let invoked_task = Arc::new(AtomicBool::new(false));
+    let invoked_in_task = Arc::clone(&invoked_task);
+    match submission.as_str() {
+        "runnable" => {
+            service
+                .try_submit::<_, io::Error>(move || {
+                    invoked_in_task.store(true, Ordering::SeqCst);
+                    Ok(())
+                })
+                .expect("runnable should be accepted");
+        }
+        "callable" => {
+            let handle = service
+                .try_submit_callable(move || {
+                    invoked_in_task.store(true, Ordering::SeqCst);
+                    Ok::<(), io::Error>(())
+                })
+                .expect("callable should be accepted");
+            assert!(matches!(handle.get(), Err(qubit_executor::TaskExecutionError::Dropped)));
+        }
+        "tracked" => {
+            let handle = service
+                .try_submit_tracked_callable(move || {
+                    invoked_in_task.store(true, Ordering::SeqCst);
+                    Ok::<(), io::Error>(())
+                })
+                .expect("tracked callable should be accepted");
+            assert!(matches!(handle.get(), Err(qubit_executor::TaskExecutionError::Dropped)));
+        }
+        _ => panic!("unknown submission kind: {submission}"),
+    }
+
+    assert!(invoked.load(Ordering::SeqCst), "capacity watcher should be woken");
+    assert!(
+        !invoked_task.load(Ordering::SeqCst),
+        "closed runtime must not run accepted work"
+    );
+    assert_eq!(service.stats().queued + service.stats().running, 0);
+    service.shutdown();
+    assert!(service.wait_termination_timeout(Duration::from_secs(2)));
+}
+
+#[test]
+fn test_closed_runtime_capacity_waker_watchdog_matrix() {
+    if std::env::var_os(CLOSED_RUNTIME_CHILD).is_some() {
+        return;
+    }
+
+    for submission in ["runnable", "callable", "tracked"] {
+        for reentry in ["submit", "shutdown", "stop"] {
+            let mut child = Command::new(std::env::current_exe().expect("test executable path"))
+                .args(["--exact", "test_closed_runtime_capacity_waker_child", "--nocapture"])
+                .env(CLOSED_RUNTIME_CHILD, "1")
+                .env("QUBIT_CLOSED_RUNTIME_SUBMISSION", submission)
+                .env("QUBIT_CLOSED_RUNTIME_REENTRY", reentry)
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("child test should start");
+            let deadline = Instant::now() + WATCHDOG_TIMEOUT;
+            loop {
+                if let Some(status) = child.try_wait().expect("child status should be readable") {
+                    let mut stderr = String::new();
+                    child
+                        .stderr
+                        .take()
+                        .expect("child stderr should exist")
+                        .read_to_string(&mut stderr)
+                        .expect("stderr should read");
+                    assert!(
+                        status.success(),
+                        "{submission}/{reentry} child exited with {status}: {stderr}"
+                    );
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("timed-out child should be killed");
+                    let status = child.wait().expect("timed-out child should be reaped");
+                    let mut stderr = String::new();
+                    child
+                        .stderr
+                        .take()
+                        .expect("child stderr should exist")
+                        .read_to_string(&mut stderr)
+                        .expect("child stderr should read");
+                    panic!(
+                        "{submission}/{reentry} Waker reentry timed out; child was killed and reaped ({status}): {stderr}"
+                    );
+                }
+                thread::sleep(Duration::from_millis(10));
             }
         }
     }
