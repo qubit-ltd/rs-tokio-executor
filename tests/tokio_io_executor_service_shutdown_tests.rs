@@ -167,19 +167,42 @@ async fn test_tokio_io_executor_service_await_termination_waits_for_task_complet
 #[tokio::test]
 async fn test_tokio_io_executor_service_stop_aborts_running_task_handle() {
     let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
 
     let handle = service
-        .spawn(async {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            Ok::<(), io::Error>(())
+        .spawn(async move {
+            started_tx.send(()).expect("start should be observed");
+            std::future::pending::<Result<(), io::Error>>().await
         })
         .expect("service should accept task");
 
-    tokio::task::yield_now().await;
-    let report = service.stop();
+    tokio::time::timeout(Duration::from_secs(5), started_rx)
+        .await
+        .expect("task should start")
+        .expect("start signal should arrive");
+    assert_eq!(service.stats().accepted_unfinished, 1);
 
-    assert!(report.cancelled >= 1);
-    assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
+    let stop_service = service.clone();
+    let (report_tx, report_rx) = mpsc::channel();
+    let stop_thread = std::thread::spawn(move || {
+        let report = stop_service.stop();
+        report_tx.send(report).expect("test thread should receive stop report");
+    });
+    let report = report_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("stop should return a report");
+    stop_thread.join().expect("stop thread should not panic");
+
+    assert_eq!(report.running, 1);
+    assert_eq!(report.cancelled, 1);
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("cancelled task should resolve");
+    assert!(matches!(result, Err(TaskExecutionError::Cancelled)));
+    tokio::time::timeout(Duration::from_secs(5), service.await_termination())
+        .await
+        .expect("service should terminate");
+    assert_eq!(service.stats().accepted_unfinished, 0);
     assert!(service.is_not_running());
     assert!(service.is_terminated());
 }
