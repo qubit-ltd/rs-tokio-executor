@@ -13,6 +13,7 @@ use std::num::NonZeroUsize;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::task::Context;
@@ -23,14 +24,18 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use qubit_executor::TaskExecutionError;
+use qubit_executor::TryGet;
 use qubit_executor::service::ExecutorService;
 use qubit_executor::service::SubmissionError;
+use qubit_executor::task::spi::TaskResultHandle;
 use qubit_tokio_executor::TokioExecutorService;
 use qubit_tokio_executor::TokioIoExecutorService;
 
 const CHILD_MODE: &str = "QUBIT_REENTRANT_WAKER_CHILD";
 const WATCHDOG_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSED_RUNTIME_CHILD: &str = "QUBIT_CLOSED_RUNTIME_CAPACITY_CHILD";
+const QUEUED_STOP_CHILD: &str = "QUBIT_QUEUED_STOP_CHILD";
 
 struct ReentrantWake {
     invoked: Arc<AtomicBool>,
@@ -295,6 +300,254 @@ fn test_reentrant_waker_watchdog_matrix() {
                     }
                 }
             }
+        }
+    }
+}
+
+struct ReleaseBlockingWorker(Option<std::sync::mpsc::Sender<()>>);
+
+impl Drop for ReleaseBlockingWorker {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StopNotificationObservation {
+    lifecycle: String,
+    result: String,
+}
+
+fn result_observation_waker<H, R, E>(
+    label: &'static str,
+    lifecycle: Arc<dyn Fn() -> String + Send + Sync>,
+    handle: Arc<Mutex<Option<H>>>,
+    observations: Arc<Mutex<Vec<(&'static str, StopNotificationObservation)>>>,
+    invoked: Arc<AtomicBool>,
+) -> Waker
+where
+    H: TaskResultHandle<R, E> + Send + 'static,
+    R: Send + 'static,
+    E: Send + 'static,
+{
+    Waker::from(Arc::new(ReentrantWake {
+        invoked,
+        reenter: Box::new(move || {
+            let lifecycle = lifecycle();
+            let mut handle_guard = handle.lock().expect("result handle lock should be healthy");
+            let result = match handle_guard.take() {
+                Some(result_handle) => match result_handle.try_get() {
+                    TryGet::Ready(Err(TaskExecutionError::Cancelled)) => "cancelled".to_owned(),
+                    TryGet::Ready(Ok(_)) => "success".to_owned(),
+                    TryGet::Ready(Err(_)) => "other-error".to_owned(),
+                    TryGet::Pending(pending) => {
+                        *handle_guard = Some(pending);
+                        "pending".to_owned()
+                    }
+                },
+                None => "already-consumed".to_owned(),
+            };
+            observations
+                .lock()
+                .expect("observation lock should be healthy")
+                .push((label, StopNotificationObservation { lifecycle, result }));
+        }),
+    }))
+}
+
+async fn finish_queued_stop_case<H, R, E>(
+    service: &TokioExecutorService,
+    external_worker: tokio::task::JoinHandle<()>,
+    release_worker: ReleaseBlockingWorker,
+    handle: H,
+    user_called: Arc<AtomicBool>,
+    tracked: bool,
+) where
+    H: TaskResultHandle<R, E> + Send + 'static,
+    R: Send + 'static,
+    E: Send + 'static,
+{
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let handle = Arc::new(Mutex::new(Some(handle)));
+    let lifecycle_service = service.clone();
+    let lifecycle: Arc<dyn Fn() -> String + Send + Sync> =
+        Arc::new(move || format!("{:?}", lifecycle_service.lifecycle()));
+    let capacity_waker = result_observation_waker(
+        "capacity",
+        Arc::clone(&lifecycle),
+        Arc::clone(&handle),
+        Arc::clone(&observations),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let termination_waker = result_observation_waker(
+        "termination",
+        lifecycle,
+        Arc::clone(&handle),
+        Arc::clone(&observations),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let mut capacity = service.capacity_changes();
+    let mut changed = Box::pin(capacity.changed());
+    assert!(matches!(
+        changed.as_mut().poll(&mut Context::from_waker(&capacity_waker)),
+        Poll::Pending
+    ));
+    let mut terminated = Box::pin(service.await_termination());
+    assert!(matches!(
+        terminated.as_mut().poll(&mut Context::from_waker(&termination_waker)),
+        Poll::Pending
+    ));
+
+    let report = service.stop();
+    assert_eq!(report.queued, 1);
+    assert_eq!(report.running, 0);
+    assert_eq!(report.cancelled, 1);
+    assert_eq!(service.stop().cancelled, 0, "repeated stop must not count twice");
+    drop(release_worker);
+    tokio::time::timeout(WATCHDOG_TIMEOUT, external_worker)
+        .await
+        .expect("external blocking worker should be released")
+        .expect("external blocking worker should join");
+    tokio::time::timeout(WATCHDOG_TIMEOUT, &mut terminated)
+        .await
+        .expect("service should terminate");
+
+    let observed = observations.lock().expect("observations should be readable").clone();
+    assert!(observed.iter().any(|(source, _)| *source == "capacity"));
+    assert!(observed.iter().any(|(source, _)| *source == "termination"));
+    assert!(
+        observed
+            .iter()
+            .all(|(_, event)| matches!(event.result.as_str(), "pending" | "cancelled" | "already-consumed"))
+    );
+    if observed.iter().any(|(_, event)| event.result == "already-consumed") {
+        assert!(
+            observed.iter().any(|(_, event)| event.result == "cancelled"),
+            "already-consumed requires another callback to record cancellation"
+        );
+    }
+    assert!(observed.iter().all(|(_, event)| event.lifecycle == "Terminated"));
+    let remaining_handle = handle.lock().expect("result handle lock should be healthy").take();
+    if let Some(handle) = remaining_handle {
+        assert!(matches!(handle.get(), Err(TaskExecutionError::Cancelled)));
+    } else {
+        assert!(
+            observed.iter().any(|(_, event)| event.result == "cancelled"),
+            "a callback that consumed the result handle must observe cancellation"
+        );
+    }
+    assert!(!user_called.load(Ordering::SeqCst), "queued user callable must not run");
+    assert_eq!(service.stats().queued, 0);
+    assert_eq!(service.stats().running, 0);
+    assert!(service.is_terminated());
+    println!("tracked={tracked} result observations: {observed:?}");
+}
+
+#[test]
+fn test_queued_blocking_stop_child() {
+    if std::env::var_os(QUEUED_STOP_CHILD).is_none() {
+        return;
+    }
+    let tracked = std::env::var("QUBIT_QUEUED_STOP_TRACKED").expect("tracked case flag") == "1";
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .expect("runtime should build");
+
+    runtime.block_on(async {
+        let (worker_started_tx, worker_started_rx) = std::sync::mpsc::channel();
+        let (worker_release_tx, worker_release_rx) = std::sync::mpsc::channel();
+        let release_worker = ReleaseBlockingWorker(Some(worker_release_tx));
+        let external_worker = runtime.handle().spawn_blocking(move || {
+            worker_started_tx.send(()).expect("worker start should be observed");
+            let _ = worker_release_rx.recv();
+        });
+        worker_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("external blocker should occupy the only blocking worker");
+
+        let service = TokioExecutorService::with_task_capacity(
+            runtime.handle().clone(),
+            NonZeroUsize::new(1).expect("capacity should be nonzero"),
+        );
+        let user_called = Arc::new(AtomicBool::new(false));
+        let called_by_callable = Arc::clone(&user_called);
+        if tracked {
+            let tracked_handle = service
+                .submit_tracked_callable(move || {
+                    called_by_callable.store(true, Ordering::SeqCst);
+                    Ok::<(), io::Error>(())
+                })
+                .expect("tracked callable should be accepted into queue");
+            finish_queued_stop_case(
+                &service,
+                external_worker,
+                release_worker,
+                tracked_handle,
+                user_called,
+                tracked,
+            )
+            .await;
+        } else {
+            let ordinary_handle = service
+                .submit_callable(move || {
+                    called_by_callable.store(true, Ordering::SeqCst);
+                    Ok::<(), io::Error>(())
+                })
+                .expect("ordinary callable should be accepted into queue");
+            finish_queued_stop_case(
+                &service,
+                external_worker,
+                release_worker,
+                ordinary_handle,
+                user_called,
+                tracked,
+            )
+            .await;
+        }
+    });
+}
+
+#[test]
+fn test_queued_blocking_stop_watchdog_matrix() {
+    if std::env::var_os(QUEUED_STOP_CHILD).is_some() {
+        return;
+    }
+    for tracked in [false, true] {
+        let mut child = Command::new(std::env::current_exe().expect("test executable path"))
+            .args(["--exact", "test_queued_blocking_stop_child", "--nocapture"])
+            .env(QUEUED_STOP_CHILD, "1")
+            .env("QUBIT_QUEUED_STOP_TRACKED", if tracked { "1" } else { "0" })
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("child test should start");
+        let deadline = Instant::now() + WATCHDOG_TIMEOUT;
+        loop {
+            if let Some(status) = child.try_wait().expect("child status should be readable") {
+                if !status.success() {
+                    let mut stderr = String::new();
+                    if let Some(mut pipe) = child.stderr.take() {
+                        let _ = pipe.read_to_string(&mut stderr);
+                    }
+                    panic!("tracked={tracked} child exited with {status}; stderr: {stderr}");
+                }
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().expect("timed-out child should be killed");
+                let status = child.wait().expect("timed-out child should be reaped");
+                let mut stderr = String::new();
+                if let Some(mut pipe) = child.stderr.take() {
+                    let _ = pipe.read_to_string(&mut stderr);
+                }
+                panic!("tracked={tracked} child timed out; killed/reaped with {status}; stderr: {stderr}");
+            }
+            thread::sleep(Duration::from_millis(10));
         }
     }
 }
