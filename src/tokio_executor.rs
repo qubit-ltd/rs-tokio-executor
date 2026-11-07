@@ -26,9 +26,8 @@ use qubit_function::Callable;
 ///   from another runtime or a plain thread while the bound runtime remains
 ///   alive; the task is still submitted to the bound runtime.
 /// * **Await the returned tracked task on Tokio** — the returned
-///   [`TrackedTask`] implements [`IntoFuture`](std::future::IntoFuture), so it
-///   can be awaited inside a Tokio-driven async context after submission
-///   succeeds.
+///   [`TrackedTask`] implements [`IntoFuture`], so it can be awaited inside a
+///   Tokio-driven async context after submission succeeds.
 /// * **Blocking pool** — the closure runs on Tokio's *blocking* thread pool,
 ///   not on the core async worker threads, so heavy synchronous work does not
 ///   starve other async tasks on the runtime.
