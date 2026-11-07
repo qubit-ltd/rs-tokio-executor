@@ -77,6 +77,8 @@ async fn test_tokio_executor_service_capacity_bounds_and_reuses_completed_slots(
     );
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
+    // Subscribe before releasing the first task so its completion cannot be missed.
+    let mut changes = service.capacity_changes();
     let first: TaskHandle<(), io::Error> = service
         .submit_callable(move || {
             started_tx.send(()).expect("test should receive start signal");
@@ -98,6 +100,17 @@ async fn test_tokio_executor_service_capacity_bounds_and_reuses_completed_slots(
         .await
         .expect("result waiter should join")
         .expect("first task should finish");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let stats = service.stats();
+            if stats.queued + stats.running == 0 {
+                break;
+            }
+            changes.changed().await.expect("capacity sender remains alive");
+        }
+    })
+    .await
+    .expect("completed task should release service accounting");
     let replacement: TaskHandle<usize, io::Error> = service
         .submit_callable(ok_usize_task as fn() -> Result<usize, io::Error>)
         .expect("completed task should release its capacity slot");
