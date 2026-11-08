@@ -166,6 +166,7 @@ async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_
     let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
 
     let handle = service
         .submit_callable(move || {
@@ -180,17 +181,25 @@ async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_
         .expect("blocking task should start");
     let report = service.stop();
     let waiter_service = service.clone();
-    let termination_result = tokio::time::timeout(
-        Duration::from_millis(50),
-        tokio::task::spawn_blocking(move || waiter_service.wait_termination()),
-    )
-    .await;
-
-    assert!(termination_result.is_err());
-    release_tx
-        .send(())
-        .expect("blocking task should receive release signal");
-    service.wait_termination();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (completed_tx, completed_rx) = mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        entered_tx.send(()).expect("observe waiter entry");
+        waiter_service.wait_termination();
+        completed_tx.send(()).expect("observe waiter completion");
+    });
+    entered_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("waiter enters");
+    assert!(matches!(
+        completed_rx.recv_timeout(Duration::from_millis(50)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    release.release();
+    completed_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("waiter completes after task release");
+    waiter.join().expect("waiter thread should finish");
 
     assert_eq!(report.cancelled, 0);
     assert!(service.is_not_running());
@@ -298,6 +307,7 @@ async fn test_tokio_executor_service_completion_keeps_waiting_for_remaining_task
     let service = TokioExecutorService::new(tokio::runtime::Handle::current());
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
+    let mut release = ReleaseOnDrop(Some(release_tx));
 
     let blocked_handle = service
         .submit_tracked(move || {
@@ -318,17 +328,25 @@ async fn test_tokio_executor_service_completion_keeps_waiting_for_remaining_task
 
     service.shutdown();
     let waiter_service = service.clone();
-    let termination_result = tokio::time::timeout(
-        Duration::from_millis(50),
-        tokio::task::spawn_blocking(move || waiter_service.wait_termination()),
-    )
-    .await;
-
-    assert!(termination_result.is_err());
-    release_tx
-        .send(())
-        .expect("blocking task should receive release signal");
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (completed_tx, completed_rx) = mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        entered_tx.send(()).expect("observe waiter entry");
+        waiter_service.wait_termination();
+        completed_tx.send(()).expect("observe waiter completion");
+    });
+    entered_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("waiter enters");
+    assert!(matches!(
+        completed_rx.recv_timeout(Duration::from_millis(50)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    release.release();
+    completed_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("waiter completes after task release");
+    waiter.join().expect("waiter thread should finish");
     blocked_handle.await.expect("blocked task should complete successfully");
-    service.wait_termination();
     assert!(service.is_terminated());
 }

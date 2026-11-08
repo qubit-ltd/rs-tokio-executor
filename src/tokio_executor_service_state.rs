@@ -249,8 +249,26 @@ impl TokioExecutorServiceState {
 
     /// Blocks until the service has reached termination.
     pub(crate) fn wait_termination(&self) {
-        self.task_counts
-            .wait_until_ready(|counts| self.is_not_running() && counts.is_empty());
+        self.wait_termination_inner(None);
+    }
+
+    /// Waits for termination while signaling when the monitor observes a
+    /// predicate value that still has outstanding work.
+    #[cfg(test)]
+    pub(crate) fn wait_termination_with_observer(&self, checked_tx: std::sync::mpsc::SyncSender<()>) {
+        self.wait_termination_inner(Some(&checked_tx));
+    }
+
+    fn wait_termination_inner(&self, checked_tx: Option<&std::sync::mpsc::SyncSender<()>>) {
+        self.task_counts.wait_until_ready(|counts| {
+            let terminated = self.is_not_running() && counts.is_empty();
+            if let Some(checked_tx) = checked_tx {
+                if !terminated {
+                    let _ = checked_tx.try_send(());
+                }
+            }
+            terminated
+        });
     }
 
     /// Waits until termination or the total timeout expires.
