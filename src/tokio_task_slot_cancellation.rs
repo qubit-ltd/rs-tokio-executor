@@ -38,7 +38,7 @@ pub(crate) fn share_task_slot<R, E>(slot: TaskSlot<R, E>) -> SharedTaskSlot<R, E
     Arc::new(TaskSlotCell::new(slot))
 }
 
-/// Takes the task slot from shared storage while tolerating poisoned locks.
+/// Takes the task slot from shared optional storage.
 ///
 /// # Parameters
 ///

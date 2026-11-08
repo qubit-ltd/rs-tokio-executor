@@ -9,9 +9,12 @@ use std::future::Future;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use qubit_executor::TaskExecutionError;
 use qubit_executor::service::ExecutorServiceLifecycle;
 use qubit_executor::service::StopReport;
 use qubit_executor::service::SubmissionError;
+use tokio::runtime::Handle;
+use tokio::sync::oneshot;
 
 use crate::RejectedTask;
 use crate::TokioIoExecutorServiceStats;
@@ -42,7 +45,7 @@ pub struct TokioIoExecutorService {
     /// Shared service state used by all clones of this service.
     state: Arc<TokioIoExecutorServiceState>,
     /// Runtime handle used for all async submissions.
-    runtime: tokio::runtime::Handle,
+    runtime: Handle,
 }
 
 /// Maximum number of accepted unfinished async tasks by default.
@@ -67,7 +70,7 @@ impl TokioIoExecutorService {
     /// `Runtime::block_on`. See the [runtime guide](https://github.com/qubit-ltd/rs-tokio-executor/blob/main/doc/user_guide.md#runtime-lifetime-and-driver-progress).
     #[must_use]
     #[inline]
-    pub fn new(runtime: tokio::runtime::Handle) -> Self {
+    pub fn new(runtime: Handle) -> Self {
         Self::with_task_capacity(
             runtime,
             NonZeroUsize::new(DEFAULT_TASK_CAPACITY).expect("default task capacity should be nonzero"),
@@ -93,7 +96,7 @@ impl TokioIoExecutorService {
     ///
     /// A Tokio-backed service configured with the supplied capacity.
     #[must_use]
-    pub fn with_task_capacity(runtime: tokio::runtime::Handle, task_capacity: NonZeroUsize) -> Self {
+    pub fn with_task_capacity(runtime: Handle, task_capacity: NonZeroUsize) -> Self {
         let state = Arc::new(TokioIoExecutorServiceState::with_task_capacity(task_capacity));
         Self { state, runtime }
     }
@@ -236,11 +239,11 @@ impl TokioIoExecutorService {
         }
         let marker = TokioTaskRegistration::new();
         let guard = TokioIoServiceTaskGuard::new(Arc::clone(&self.state), Arc::clone(&marker));
-        let (sender, receiver) = tokio::sync::oneshot::channel::<TokioGuardedIoFuture<F>>();
+        let (sender, receiver) = oneshot::channel::<TokioGuardedIoFuture<F>>();
         let handle = self.runtime.spawn(async move {
             match receiver.await {
                 Ok(future) => future.await,
-                Err(_) => Err(qubit_executor::TaskExecutionError::Cancelled),
+                Err(_) => Err(TaskExecutionError::Cancelled),
             }
         });
         self.state.register_abort_handle(marker, handle.abort_handle());

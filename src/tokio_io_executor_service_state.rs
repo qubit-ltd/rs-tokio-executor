@@ -80,7 +80,7 @@ impl TokioIoExecutorServiceState {
         }
     }
 
-    /// Acquires the submission lock while tolerating poisoned locks.
+    /// Acquires the submission mutex to serialize admission and shutdown.
     ///
     /// # Returns
     ///
@@ -188,7 +188,7 @@ impl TokioIoExecutorServiceState {
         cancellation_count
     }
 
-    /// Acquires the abort-handle list while tolerating poisoned locks.
+    /// Acquires the mutex protecting the tracked Tokio abort handles.
     ///
     /// # Returns
     ///
