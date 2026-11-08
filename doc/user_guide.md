@@ -55,8 +55,8 @@ appropriate boundary because the parser can occupy an OS thread.
 ```toml
 [dependencies]
 qubit-tokio-executor = "0.12"
-qubit-executor = "0.9"
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
+qubit-executor = "0.9.1"
+tokio = { version = "1.54", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
 This crate does not start a runtime. Construct the service inside an existing

@@ -17,8 +17,8 @@ executor abstractions.
 ```toml
 [dependencies]
 qubit-tokio-executor = "0.12"
-qubit-executor = "0.9"
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
+qubit-executor = "0.9.1"
+tokio = { version = "1.54", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
 The crate does not create or own a Tokio runtime. Construct a service with the

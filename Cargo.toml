@@ -21,6 +21,7 @@ include = [
     "/RUST_CODING_STYLE.md",
     "/RUST_CODING_STYLE.zh_CN.md",
     "/doc/**/user_guide*.md",
+    "/doc/concurrency-design*.md",
     "/examples/**",
     "/resources/**",
     "/src/**",
@@ -37,10 +38,12 @@ tokio = { version = "^1.54", features = ["rt", "sync"] }
 parking_lot = "^0.12"
 qubit-atomic = "^0.17"
 qubit-function = "^0.18"
-qubit-executor = "^0.9.1"
+qubit-executor = { version = "^0.9.1", path = "../rs-executor" }
 qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], version = "^0.14" }
 
 [dev-dependencies]
+semver = "^1"
+toml = "^0.9"
 tokio = { version = "^1.54", features = ["macros", "rt-multi-thread", "time"] }
 
 [workspace]

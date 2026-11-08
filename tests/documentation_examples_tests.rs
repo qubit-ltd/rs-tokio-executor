@@ -413,6 +413,7 @@ fn validate_document_dependencies(
     document: &str,
     source: &str,
     package_version: &str,
+    manifest_source: &str,
 ) -> Result<BTreeMap<String, Dependency>, String> {
     let blocks = extract_toml_blocks(document, source)?;
     let mut expected: Option<BTreeMap<String, Dependency>> = None;
@@ -430,18 +431,15 @@ fn validate_document_dependencies(
                 tokio_executor.version
             ));
         }
-        let qubit_executor = parsed
-            .get("qubit-executor")
-            .ok_or_else(|| format!("{source}:{line}: missing qubit-executor dependency"))?;
-        if qubit_executor.version != "0.9" {
-            return Err(format!("{source}:{line}: missing qubit-executor dependency"));
+        for (name, display_name) in [("qubit-executor", "qubit-executor"), ("tokio", "Tokio")] {
+            let dependency = parsed
+                .get(name)
+                .ok_or_else(|| format!("{source}:{line}: missing {display_name} dependency"))?;
+            let manifest_requirement = manifest_dependency_requirement(manifest_source, name)?;
+            validate_dependency_requirement(&manifest_requirement, dependency, name)
+                .map_err(|error| format!("{source}:{line}: {error}"))?;
         }
-        let tokio = parsed
-            .get("tokio")
-            .ok_or_else(|| format!("{source}:{line}: missing Tokio dependency"))?;
-        if tokio.version != "1.53" {
-            return Err(format!("{source}:{line}: Tokio dependency must use version 1.53"));
-        }
+        let tokio = parsed.get("tokio").expect("Tokio dependency was validated");
         for feature in ["macros", "rt-multi-thread", "time"] {
             if !tokio.features.iter().any(|item| item == feature) {
                 return Err(format!("{source}:{line}: Tokio dependency missing `{feature}` feature"));
@@ -456,6 +454,62 @@ fn validate_document_dependencies(
         }
     }
     expected.ok_or_else(|| format!("{source}: no parsed install dependencies"))
+}
+
+fn manifest_dependency_requirement(manifest_source: &str, name: &str) -> Result<String, String> {
+    let manifest: toml::Value = toml::from_str(manifest_source)
+        .map_err(|error| format!("Cargo.toml is invalid while reading {name} dependency: {error}"))?;
+    let dependency = manifest
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.get(name))
+        .ok_or_else(|| format!("Cargo.toml is missing {name} dependency"))?;
+    let requirement = dependency
+        .as_str()
+        .or_else(|| dependency.get("version").and_then(toml::Value::as_str))
+        .ok_or_else(|| format!("Cargo.toml {name} dependency has no string version requirement"))?;
+    Ok(requirement.to_owned())
+}
+
+fn caret_lower_bound(requirement: &str, dependency: &str, source: &str) -> Result<semver::Version, String> {
+    let parsed = semver::VersionReq::parse(requirement)
+        .map_err(|error| format!("{source} {dependency} requirement {requirement:?} is invalid: {error}"))?;
+    if parsed.comparators.len() != 1
+        || parsed.comparators[0].op != semver::Op::Caret
+        || parsed.comparators[0].minor.is_none()
+        || !parsed.comparators[0].pre.is_empty()
+    {
+        return Err(format!(
+            "{source} {dependency} requirement {requirement:?} is unsupported; expected one caret major.minor requirement"
+        ));
+    }
+    let comparator = &parsed.comparators[0];
+    Ok(semver::Version::new(
+        comparator.major,
+        comparator.minor.expect("minor was checked"),
+        comparator.patch.unwrap_or(0),
+    ))
+}
+
+fn validate_dependency_requirement(
+    manifest_requirement: &str,
+    document_dependency: &Dependency,
+    dependency: &str,
+) -> Result<(), String> {
+    let manifest_lower = caret_lower_bound(manifest_requirement, dependency, "Cargo.toml")?;
+    let document_lower = caret_lower_bound(&document_dependency.version, dependency, "documentation")?;
+    let document_requirement = semver::VersionReq::parse(&document_dependency.version).map_err(|error| {
+        format!(
+            "documentation {dependency} requirement {:?} is invalid: {error}",
+            document_dependency.version
+        )
+    })?;
+    if document_lower < manifest_lower || !document_requirement.matches(&manifest_lower) {
+        return Err(format!(
+            "documentation {dependency} requirement {:?} is below or excludes Cargo.toml requirement {manifest_requirement:?}",
+            document_dependency.version
+        ));
+    }
+    Ok(())
 }
 
 fn package_version(root: &Path) -> String {
@@ -524,12 +578,13 @@ fn cargo_consumer_manifest(
 fn test_documentation_programs_compile_and_run_in_a_standalone_consumer() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let version = package_version(&root);
+    let manifest_source = read_document(&root, "Cargo.toml");
     let mut dependencies = None;
     let mut programs = Vec::new();
     for relative in DOCUMENTS {
         let document = read_document(&root, relative);
-        let parsed_dependencies =
-            validate_document_dependencies(&document, relative, &version).unwrap_or_else(|error| panic!("{error}"));
+        let parsed_dependencies = validate_document_dependencies(&document, relative, &version, &manifest_source)
+            .unwrap_or_else(|error| panic!("{error}"));
         if let Some(expected) = &dependencies {
             assert_eq!(expected, &parsed_dependencies, "{relative} install block differs");
         } else {
@@ -676,8 +731,47 @@ fn test_document_example_watchdog_handles_exit_output_and_hang() {
 fn test_install_parser_rejects_invalid_toml_and_missing_required_features() {
     assert!(parse_install_toml("[dependencies]\ntokio { version = \"1\" }").is_err());
     assert!(parse_install_toml("[dependencies]\ntokio = \"1\"\ntokio = \"1\"").is_err());
-    let missing_feature = "```toml\n[dependencies]\nqubit-tokio-executor = \"0.12\"\nqubit-executor = \"0.9\"\ntokio = { version = \"1.53\", features = [\"macros\", \"time\"] }\n```";
-    assert!(validate_document_dependencies(missing_feature, "missing-feature.md", "0.12.0").is_err());
+    let missing_feature = "```toml\n[dependencies]\nqubit-tokio-executor = \"0.12\"\nqubit-executor = \"0.9.1\"\ntokio = { version = \"1.54\", features = [\"macros\", \"time\"] }\n```";
+    let manifest =
+        "[dependencies]\nqubit-executor = \"^0.9.1\"\ntokio = { version = \"^1.54\", features = [\"rt\", \"sync\"] }";
+    let error = validate_document_dependencies(missing_feature, "missing-feature.md", "0.12.0", manifest)
+        .expect_err("missing Tokio feature should be rejected");
+    assert!(error.contains("missing `rt-multi-thread` feature"), "{error}");
+}
+
+#[test]
+fn test_manifest_dependency_requirement_reads_string_and_table_versions() {
+    let manifest =
+        "[dependencies]\ntokio = \"^1.54\"\nqubit-executor = { version = \"^0.9.1\", default-features = false }";
+    assert_eq!(
+        manifest_dependency_requirement(manifest, "tokio").expect("Tokio requirement should parse"),
+        "^1.54"
+    );
+    assert_eq!(
+        manifest_dependency_requirement(manifest, "qubit-executor").expect("qubit-executor requirement should parse"),
+        "^0.9.1"
+    );
+    assert!(manifest_dependency_requirement(manifest, "missing").is_err());
+    assert!(manifest_dependency_requirement("[dependencies", "tokio").is_err());
+}
+
+#[test]
+fn test_document_dependency_requirements_follow_manifest_lower_bounds() {
+    let dependency = |version: &str| Dependency {
+        version: version.to_owned(),
+        features: Vec::new(),
+    };
+    let manifest_154 = "[dependencies]\ntokio = { version = \"^1.54\" }";
+    let manifest_154_requirement = manifest_dependency_requirement(manifest_154, "tokio").unwrap();
+    assert!(validate_dependency_requirement(&manifest_154_requirement, &dependency("1.54"), "tokio").is_ok());
+    assert!(validate_dependency_requirement(&manifest_154_requirement, &dependency("^1.54"), "tokio").is_ok());
+    assert!(validate_dependency_requirement(&manifest_154_requirement, &dependency("1.53"), "tokio").is_err());
+    let manifest_155 = "[dependencies]\ntokio = { version = \"^1.55\" }";
+    let manifest_155_requirement = manifest_dependency_requirement(manifest_155, "tokio").unwrap();
+    assert!(validate_dependency_requirement(&manifest_155_requirement, &dependency("1.54"), "tokio").is_err());
+    assert!(validate_dependency_requirement("^0.9.1", &dependency("0.9"), "qubit-executor").is_err());
+    assert!(validate_dependency_requirement("^1.54", &dependency("not-semver"), "tokio").is_err());
+    assert!(caret_lower_bound(">=1.54, <2", "tokio", "Cargo.toml").is_err());
 }
 
 #[test]

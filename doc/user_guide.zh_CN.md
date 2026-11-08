@@ -30,8 +30,8 @@
 ```toml
 [dependencies]
 qubit-tokio-executor = "0.12"
-qubit-executor = "0.9"
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
+qubit-executor = "0.9.1"
+tokio = { version = "1.54", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
 本 crate 不会替你启动 runtime。请在已有 Tokio 应用中构造服务，或者传入应用自己持有的 runtime 句柄。

@@ -90,3 +90,21 @@ fn test_user_docs_do_not_reference_removed_api_names() {
         assert!(!document.contains("TokioExecution"), "{name} references removed API");
     }
 }
+
+/// Ensures the published user guides' bilingual concurrency-design links point
+/// to files included in the crate package.
+#[test]
+fn test_concurrency_design_links_resolve_to_project_files() {
+    for (guide, target) in [
+        ("doc/user_guide.md", "doc/concurrency-design.md"),
+        ("doc/user_guide.zh_CN.md", "doc/concurrency-design.zh_CN.md"),
+    ] {
+        let document = read_project_file(guide);
+        let link_target = target.strip_prefix("doc/").expect("target should be under doc");
+        assert!(
+            document.contains(&format!("]({link_target})")),
+            "{guide} must link to {target}"
+        );
+        assert!(std::path::Path::new(target).is_file(), "{target} must exist");
+    }
+}
