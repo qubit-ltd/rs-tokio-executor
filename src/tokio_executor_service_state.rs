@@ -273,10 +273,10 @@ impl TokioExecutorServiceState {
     fn wait_termination_inner(&self, checked_tx: Option<&std::sync::mpsc::SyncSender<()>>) {
         self.task_counts.wait_until_ready(|counts| {
             let terminated = self.is_not_running() && counts.is_empty();
-            if let Some(checked_tx) = checked_tx {
-                if !terminated {
-                    let _ = checked_tx.try_send(());
-                }
+            if let Some(checked_tx) = checked_tx
+                && !terminated
+            {
+                let _ = checked_tx.try_send(());
             }
             terminated
         });
