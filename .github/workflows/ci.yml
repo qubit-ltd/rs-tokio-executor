@@ -18,6 +18,46 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  adapter-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out executor
+        uses: actions/checkout@v4
+        with:
+          repository: qubit-ltd/rs-executor
+          ref: 22c2cacf17546b72c8fc93137dd0768d1576915b
+          path: rs-executor
+      - name: Check out Rayon adapter
+        uses: actions/checkout@v4
+        with:
+          repository: qubit-ltd/rs-rayon-executor
+          ref: 78b24704fa015ce2373311d4274670554a14e8d5
+          path: rs-rayon-executor
+      - name: Check out Tokio adapter
+        uses: actions/checkout@v4
+        with:
+          path: rs-tokio-executor
+      - name: Check out thread pool
+        uses: actions/checkout@v4
+        with:
+          repository: qubit-ltd/rs-thread-pool
+          ref: b18562cfdc29fe53bc16a683927049cecdb4c08b
+          path: rs-thread-pool
+      - name: Install project Rust toolchain
+        working-directory: rs-executor
+        run: rustup toolchain install 1.94.0 --profile minimal
+      - name: Check fixture dependency baseline
+        working-directory: rs-executor
+        run: |
+          ln -s ../../.infra tests/adapter_contracts/.infra
+          ./.infra/bin/infra-tool.sh rs-infra-dependency --project tests/adapter_contracts check
+      - name: Run adapter contract tests
+        working-directory: rs-executor
+        run: cargo test --locked --manifest-path tests/adapter_contracts/Cargo.toml
+
   rust-ci:
     permissions:
       contents: read
