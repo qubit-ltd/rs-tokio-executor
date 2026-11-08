@@ -440,3 +440,4 @@ service types when you need lifecycle and task accounting.
 - [README](../README.md)
 - [中文用户手册](user_guide.zh_CN.md)
 - [API documentation](https://docs.rs/qubit-tokio-executor)
+- [Concurrency protocol](concurrency-design.md)

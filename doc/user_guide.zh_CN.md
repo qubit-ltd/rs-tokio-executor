@@ -342,3 +342,4 @@ runtime 关闭的表格场景来自已有回归测试，并不代表每种关闭
 - [README](../README.zh_CN.md)
 - [English user guide](user_guide.md)
 - [API 文档](https://docs.rs/qubit-tokio-executor)
+- [并发协议](concurrency-design.zh_CN.md)
