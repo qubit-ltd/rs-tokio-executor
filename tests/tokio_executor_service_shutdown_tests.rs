@@ -188,9 +188,7 @@ async fn test_tokio_executor_service_stop_reports_no_cancelled_running_blocking_
         waiter_service.wait_termination();
         completed_tx.send(()).expect("observe waiter completion");
     });
-    entered_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("waiter enters");
+    entered_rx.recv_timeout(Duration::from_secs(5)).expect("waiter enters");
     assert!(matches!(
         completed_rx.recv_timeout(Duration::from_millis(50)),
         Err(mpsc::RecvTimeoutError::Timeout)
@@ -335,9 +333,7 @@ async fn test_tokio_executor_service_completion_keeps_waiting_for_remaining_task
         waiter_service.wait_termination();
         completed_tx.send(()).expect("observe waiter completion");
     });
-    entered_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("waiter enters");
+    entered_rx.recv_timeout(Duration::from_secs(5)).expect("waiter enters");
     assert!(matches!(
         completed_rx.recv_timeout(Duration::from_millis(50)),
         Err(mpsc::RecvTimeoutError::Timeout)

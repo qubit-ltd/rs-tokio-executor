@@ -254,11 +254,22 @@ impl TokioExecutorServiceState {
 
     /// Waits for termination while signaling when the monitor observes a
     /// predicate value that still has outstanding work.
+    ///
+    /// # Parameters
+    ///
+    /// * `checked_tx` - Non-blocking signal sent after the monitor observes
+    ///   outstanding work.
     #[cfg(test)]
     pub(crate) fn wait_termination_with_observer(&self, checked_tx: std::sync::mpsc::SyncSender<()>) {
         self.wait_termination_inner(Some(&checked_tx));
     }
 
+    /// Waits for termination and optionally reports a non-terminated
+    /// predicate observation to a test observer.
+    ///
+    /// # Parameters
+    ///
+    /// * `checked_tx` - Optional non-blocking channel for the test observer.
     fn wait_termination_inner(&self, checked_tx: Option<&std::sync::mpsc::SyncSender<()>>) {
         self.task_counts.wait_until_ready(|counts| {
             let terminated = self.is_not_running() && counts.is_empty();

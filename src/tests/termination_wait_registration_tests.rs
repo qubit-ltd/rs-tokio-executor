@@ -18,7 +18,7 @@ const CHILD_MARKER: &str = "QUBIT_TERMINATION_WAIT_REGISTRATION_CHILD";
 const WATCHDOG: Duration = Duration::from_secs(10);
 
 #[test]
-fn termination_wait_registration_child() {
+fn test_termination_wait_registration_child() {
     if std::env::var_os(CHILD_MARKER).is_none() {
         return;
     }
@@ -46,11 +46,11 @@ fn termination_wait_registration_child() {
 }
 
 #[test]
-fn termination_wait_registration_has_process_watchdog() {
+fn test_termination_wait_registration_has_process_watchdog() {
     let mut child = Command::new(std::env::current_exe().expect("test executable path"))
         .args([
             "--exact",
-            "tests::termination_wait_registration_tests::termination_wait_registration_child",
+            "tests::termination_wait_registration_tests::test_termination_wait_registration_child",
             "--nocapture",
         ])
         .env(CHILD_MARKER, "1")
@@ -62,9 +62,7 @@ fn termination_wait_registration_has_process_watchdog() {
     let deadline = Instant::now() + WATCHDOG;
     loop {
         if let Some(status) = child.try_wait().expect("child status should be readable") {
-            let output = child
-                .wait_with_output()
-                .expect("child output should be readable");
+            let output = child.wait_with_output().expect("child output should be readable");
             assert!(
                 status.success(),
                 "waiter child failed: {status}; stderr: {}",
@@ -74,9 +72,7 @@ fn termination_wait_registration_has_process_watchdog() {
         }
         if Instant::now() >= deadline {
             child.kill().expect("timed-out child should be killed");
-            let output = child
-                .wait_with_output()
-                .expect("killed child should be reaped");
+            let output = child.wait_with_output().expect("killed child should be reaped");
             panic!(
                 "termination waiter watchdog expired; child output: {}",
                 String::from_utf8_lossy(&output.stderr)
