@@ -169,14 +169,17 @@ fn test_tokio_task_handle_cancel_allows_termination_before_queued_closure_runs()
 
         assert_eq!(CancelResult::Cancelled, handle.cancel());
         service.shutdown();
-        service.wait_termination();
-
-        assert!(service.is_terminated());
-        assert!(!ran.load(Ordering::Acquire));
+        let termination_result = service.wait_termination_timeout(Duration::from_secs(5));
+        let terminated_before_release = service.is_terminated();
+        let ran_before_release = ran.load(Ordering::Acquire);
         release_tx
             .send(())
             .expect("blocking task should receive release signal");
         blocker.await.expect("blocking slot task should finish");
+        assert!(termination_result);
+        assert!(terminated_before_release);
+        assert!(!ran_before_release);
+        assert!(!ran.load(Ordering::Acquire));
         dropped_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("cancelled queued closure should be dropped after Tokio drains it");
