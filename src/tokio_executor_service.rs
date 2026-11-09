@@ -134,7 +134,7 @@ impl TokioExecutorService {
     /// ```
     /// use std::io;
     /// use std::num::NonZeroUsize;
-    /// use std::sync::{Arc, Mutex};
+    /// use std::sync::Mutex;
     /// use std::sync::mpsc;
     ///
     /// use qubit_executor::service::{ExecutorService, SubmissionError};
@@ -154,29 +154,34 @@ impl TokioExecutorService {
     ///     }).unwrap();
     ///     started_rx.await.unwrap();
     ///
-    ///     // Keep ownership until an attempt actually runs. Rejected submission
-    ///     // consumes only its wrapper, while the original callable stays here.
-    ///     let task = Arc::new(Mutex::new(Some(|| Ok::<usize, io::Error>(42))));
+    ///     let mut task = Some(|| Ok::<usize, io::Error>(42));
     ///     let mut changes = service.capacity_changes();
     ///     let mut released = false;
+    ///     let mut saturated_attempts = 0;
     ///     let result = loop {
-    ///         let task = Arc::clone(&task);
-    ///         let attempt = service.submit_callable(move || {
-    ///             let callable = task.lock().unwrap().take().unwrap();
-    ///             callable()
-    ///         });
-    ///         match attempt {
+    ///         match service.try_submit_callable(
+    ///             task.take().expect("task retained until accepted"),
+    ///         ) {
     ///             Ok(handle) => break handle.await.unwrap(),
-    ///             Err(SubmissionError::Saturated) => {
-    ///                 if !released {
-    ///                     release_tx.send(()).unwrap();
-    ///                     released = true;
+    ///             Err(rejected) => {
+    ///                 let (reason, original) = rejected.into_parts();
+    ///                 task = Some(original);
+    ///                 match reason {
+    ///                     SubmissionError::Saturated => {
+    ///                         saturated_attempts += 1;
+    ///                         if !released {
+    ///                             release_tx.send(()).unwrap();
+    ///                             released = true;
+    ///                         }
+    ///                         changes.changed().await.unwrap();
+    ///                     }
+    ///                     error => panic!("submission rejected: {error}"),
     ///                 }
-    ///                 changes.changed().await.unwrap();
-    ///             },
-    ///             Err(error) => panic!("submission rejected: {error}"),
+    ///             }
     ///         }
     ///     };
+    ///     assert_eq!(saturated_attempts, 1);
+    ///     assert!(task.is_none());
     ///     assert_eq!(result, 42);
     ///     blocker.await.unwrap();
     ///     service.shutdown();

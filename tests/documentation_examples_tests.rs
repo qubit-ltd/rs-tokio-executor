@@ -31,7 +31,11 @@ const DOCUMENTS: [&str; 4] = [
 static TEMP_ID: AtomicUsize = AtomicUsize::new(0);
 const CHILD_MODE: &str = "QUBIT_DOC_EXAMPLE_WATCHDOG_CHILD";
 const RUN_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_BUILD_TIMEOUT: Duration = Duration::from_secs(600);
+const BUILD_TIMEOUT_ENV: &str = "QUBIT_DOC_EXAMPLE_BUILD_TIMEOUT_SECS";
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+#[cfg(windows)]
+const CREATE_SUSPENDED: u32 = 0x0000_0004;
 
 struct CapturedOutput {
     status: Option<ExitStatus>,
@@ -40,18 +44,363 @@ struct CapturedOutput {
     timed_out: bool,
 }
 
-struct ChildGuard(Child);
+fn parse_build_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, String> {
+    let Some(value) = value else {
+        return Ok(DEFAULT_BUILD_TIMEOUT);
+    };
+    let value = value
+        .into_string()
+        .map_err(|_| format!("{BUILD_TIMEOUT_ENV} must be a positive integer number of seconds"))?;
+    let seconds = value
+        .parse::<u64>()
+        .map_err(|_| format!("{BUILD_TIMEOUT_ENV} must be a positive integer number of seconds"))?;
+    if seconds == 0 {
+        return Err(format!("{BUILD_TIMEOUT_ENV} must be greater than zero"));
+    }
+    let timeout = Duration::from_secs(seconds);
+    Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| format!("{BUILD_TIMEOUT_ENV} is too large to represent as a deadline"))?;
+    Ok(timeout)
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct JobObjectBasicLimitInformation {
+    per_process_user_time_limit: i64,
+    per_job_user_time_limit: i64,
+    limit_flags: u32,
+    minimum_working_set_size: usize,
+    maximum_working_set_size: usize,
+    active_process_limit: u32,
+    affinity: usize,
+    priority_class: u32,
+    scheduling_class: u32,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct JobObjectIoCounters {
+    read_operation_count: u64,
+    write_operation_count: u64,
+    other_operation_count: u64,
+    read_transfer_count: u64,
+    write_transfer_count: u64,
+    other_transfer_count: u64,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct JobObjectExtendedLimitInformation {
+    basic_limit_information: JobObjectBasicLimitInformation,
+    io_info: JobObjectIoCounters,
+    process_memory_limit: usize,
+    job_memory_limit: usize,
+    peak_process_memory_used: usize,
+    peak_job_memory_used: usize,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct ThreadEntry32 {
+    size: u32,
+    usage_count: u32,
+    thread_id: u32,
+    owner_process_id: u32,
+    base_priority: i32,
+    delta_priority: i32,
+    flags: u32,
+}
+
+#[cfg(windows)]
+struct WindowsJobObject {
+    handle: Option<std::ptr::NonNull<std::ffi::c_void>>,
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn CreateJobObjectW(attributes: *const std::ffi::c_void, name: *const u16) -> *mut std::ffi::c_void;
+    fn SetInformationJobObject(
+        job: *mut std::ffi::c_void,
+        information_class: u32,
+        information: *mut std::ffi::c_void,
+        information_length: u32,
+    ) -> i32;
+    fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void) -> i32;
+    fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+    fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut std::ffi::c_void;
+    fn Thread32First(snapshot: *mut std::ffi::c_void, entry: *mut ThreadEntry32) -> i32;
+    fn Thread32Next(snapshot: *mut std::ffi::c_void, entry: *mut ThreadEntry32) -> i32;
+    fn OpenThread(access: u32, inherit_handle: i32, thread_id: u32) -> *mut std::ffi::c_void;
+    fn ResumeThread(thread: *mut std::ffi::c_void) -> u32;
+    fn GetLastError() -> u32;
+}
+
+#[cfg(windows)]
+impl WindowsJobObject {
+    fn new() -> Result<Self, String> {
+        // SAFETY: null attributes/name request a default unnamed Job Object; the
+        // returned handle is checked and owned by this wrapper.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        let handle = std::ptr::NonNull::new(handle)
+            .ok_or_else(|| format!("CreateJobObjectW failed: {}", std::io::Error::last_os_error()))?;
+        let mut limits = JobObjectExtendedLimitInformation::default();
+        limits.basic_limit_information.limit_flags = 0x0000_2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        // SAFETY: `limits` has the documented repr(C) extended-limit layout and remains
+        // alive for the duration of this synchronous API call.
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle.as_ptr(),
+                9, // JobObjectExtendedLimitInformation
+                (&mut limits as *mut JobObjectExtendedLimitInformation).cast(),
+                std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
+            )
+        };
+        if configured == 0 {
+            let error = std::io::Error::last_os_error();
+            // SAFETY: this wrapper created the handle and no process has been assigned yet.
+            unsafe { CloseHandle(handle.as_ptr()) };
+            return Err(format!("configure Job Object kill-on-close: {error}"));
+        }
+        Ok(Self { handle: Some(handle) })
+    }
+
+    fn assign(&self, child: &Child) -> Result<(), String> {
+        use std::os::windows::io::AsRawHandle;
+        let job = self
+            .handle
+            .ok_or_else(|| "Job Object handle is already closed".to_owned())?;
+        // SAFETY: Child owns a live process handle while this method runs; the Job
+        // Object handle is valid and owned by self.
+        let assigned = unsafe { AssignProcessToJobObject(job.as_ptr(), child.as_raw_handle().cast()) };
+        if assigned == 0 {
+            return Err(format!(
+                "AssignProcessToJobObject failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(())
+    }
+
+    fn resume_primary_thread(&self, process_id: u32) -> Result<(), String> {
+        const TH32CS_SNAPTHREAD: u32 = 0x0000_0004;
+        const THREAD_SUSPEND_RESUME: u32 = 0x0000_0002;
+        const INVALID_HANDLE_VALUE: isize = -1;
+
+        // SAFETY: this requests a system-owned snapshot of threads; the invalid
+        // sentinel and null handle are checked before any other Toolhelp call.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot.is_null() || snapshot as isize == INVALID_HANDLE_VALUE {
+            return Err(format!(
+                "CreateToolhelp32Snapshot failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let mut entry = ThreadEntry32 {
+            size: std::mem::size_of::<ThreadEntry32>() as u32,
+            ..ThreadEntry32::default()
+        };
+        // SAFETY: `entry` has the documented THREADENTRY32 layout and a valid size
+        // field.
+        let first = unsafe { Thread32First(snapshot, &mut entry) };
+        if first == 0 {
+            let error = std::io::Error::last_os_error();
+            let snapshot_close = close_windows_handle(snapshot, "Toolhelp thread snapshot");
+            return Err(format!(
+                "Thread32First failed: {error}; close snapshot: {snapshot_close:?}"
+            ));
+        }
+        let mut found = true;
+        let mut matching_thread = None;
+        let mut enumeration_error = None;
+        while found {
+            if entry.owner_process_id == process_id {
+                matching_thread = Some(entry.thread_id);
+                break;
+            }
+            // SAFETY: snapshot remains open and `entry` remains a valid initialized buffer.
+            found = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+            if !found {
+                // SAFETY: GetLastError reads the calling thread's status from the failed
+                // Toolhelp32 enumeration call.
+                let error_code = unsafe { GetLastError() };
+                if error_code != 18 {
+                    enumeration_error = Some(std::io::Error::from_raw_os_error(error_code as i32));
+                }
+            }
+        }
+        let snapshot_close = close_windows_handle(snapshot, "Toolhelp thread snapshot");
+        if let Some(error) = enumeration_error {
+            return Err(format!(
+                "Thread32Next failed: {error}; close snapshot: {snapshot_close:?}"
+            ));
+        }
+        let thread_id = matching_thread.ok_or_else(|| {
+            format!("no primary thread found for suspended process {process_id}; close snapshot: {snapshot_close:?}")
+        })?;
+
+        // SAFETY: OpenThread returns an owned handle for the enumerated thread ID or
+        // null.
+        let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id) };
+        let thread = std::ptr::NonNull::new(thread).ok_or_else(|| {
+            format!(
+                "OpenThread({thread_id}) failed: {}; close snapshot: {snapshot_close:?}",
+                std::io::Error::last_os_error()
+            )
+        })?;
+        // SAFETY: the owned thread handle requests THREAD_SUSPEND_RESUME access.
+        let previous_suspend_count = unsafe { ResumeThread(thread.as_ptr()) };
+        let resume_error = (previous_suspend_count == u32::MAX).then(std::io::Error::last_os_error);
+        let thread_close = close_windows_handle(thread.as_ptr(), "primary thread");
+        if let Some(error) = resume_error {
+            return Err(format!(
+                "ResumeThread({thread_id}) failed: {error}; close thread: {thread_close:?}; close snapshot: {snapshot_close:?}"
+            ));
+        }
+        if previous_suspend_count == 0 {
+            return Err(format!(
+                "ResumeThread({thread_id}) reported a thread that was not suspended; close thread: {thread_close:?}; close snapshot: {snapshot_close:?}"
+            ));
+        }
+        thread_close?;
+        snapshot_close?;
+        Ok(())
+    }
+
+    fn close(&mut self) -> Result<(), String> {
+        let Some(handle) = self.handle else {
+            return Ok(());
+        };
+        // SAFETY: this wrapper uniquely owns the handle and closes it at most once.
+        if unsafe { CloseHandle(handle.as_ptr()) } == 0 {
+            return Err(format!(
+                "CloseHandle(Job Object) failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        self.handle = None;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn close_windows_handle(handle: *mut std::ffi::c_void, label: &str) -> Result<(), String> {
+    // SAFETY: caller passes a valid owned Win32 handle and closes it exactly once.
+    if unsafe { CloseHandle(handle) } == 0 {
+        return Err(format!(
+            "CloseHandle({label}) failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+impl Drop for WindowsJobObject {
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
+}
+
+struct ChildGuard {
+    child: Child,
+    #[cfg(unix)]
+    process_group: u32,
+    #[cfg(windows)]
+    process_id: u32,
+    #[cfg(windows)]
+    windows_job: WindowsJobObject,
+    #[cfg(not(any(unix, windows)))]
+    unsupported: (),
+}
+
+impl ChildGuard {
+    fn terminate_tree(&mut self, label: &str) -> Result<Option<ExitStatus>, String> {
+        #[cfg(unix)]
+        {
+            let group = format!("-{}", self.process_group);
+            let killed = Command::new("kill")
+                .args(["-KILL", "--", group.as_str()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|error| format!("kill process group {} for {label}: {error}", self.process_group))?;
+            if !killed.success() {
+                let exists = Command::new("kill")
+                    .args(["-0", "--", group.as_str()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map_err(|error| format!("check process group {} for {label}: {error}", self.process_group))?;
+                if exists.success() {
+                    return Err(format!(
+                        "kill process group {} for {label} exited with {killed}",
+                        self.process_group
+                    ));
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            let root_running = self
+                .child
+                .try_wait()
+                .map_err(|error| format!("poll root process {} for {label}: {error}", self.process_id))?
+                .is_none();
+            let taskkill_result = if root_running {
+                Some(
+                    Command::new("taskkill")
+                        .args(["/PID", &self.process_id.to_string(), "/T", "/F"])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status(),
+                )
+            } else {
+                None
+            };
+            self.windows_job.close().map_err(|error| {
+                format!(
+                    "close process Job Object {} for {label}: {error}; taskkill attempt: {taskkill_result:?}",
+                    self.process_id
+                )
+            })?;
+        }
+        #[cfg(not(any(unix, windows)))]
+        return Err(format!(
+            "process-tree watchdog is unsupported on this platform ({label})"
+        ));
+        self.child
+            .wait()
+            .map(Some)
+            .map_err(|error| format!("wait for {label}: {error}"))
+    }
+}
 
 impl Drop for ChildGuard {
     fn drop(&mut self) {
-        if self.0.try_wait().ok().flatten().is_none() {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
+        // The root may already have exited while descendants remain in its tree.
+        let _ = self.terminate_tree("watchdog child drop");
     }
 }
 
 fn run_with_watchdog(mut command: Command, timeout: Duration, label: &str) -> Result<CapturedOutput, String> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| format!("watchdog deadline for {label} is not representable: {timeout:?}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(any(unix, windows)))]
+    return Err(format!(
+        "process-tree watchdog is unsupported on this platform ({label})"
+    ));
     let logs = TempDir::new("watchdog-logs");
     let stdout_path = logs.0.join("stdout");
     let stderr_path = logs.0.join("stderr");
@@ -60,20 +409,83 @@ fn run_with_watchdog(mut command: Command, timeout: Duration, label: &str) -> Re
     command
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
+    #[cfg(windows)]
+    let windows_job =
+        WindowsJobObject::new().map_err(|error| format!("create process Job Object for {label}: {error}"))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_SUSPENDED);
+    }
     let child = command.spawn().map_err(|error| format!("spawn {label}: {error}"))?;
-    let mut child = ChildGuard(child);
-    let deadline = Instant::now() + timeout;
+    #[cfg(unix)]
+    let mut child = ChildGuard {
+        process_group: child.id(),
+        child,
+    };
+    #[cfg(windows)]
+    let mut child = ChildGuard {
+        process_id: child.id(),
+        windows_job,
+        child,
+    };
+    #[cfg(not(any(unix, windows)))]
+    let mut child = ChildGuard { unsupported: (), child };
+    #[cfg(windows)]
+    if let Err(error) = child.windows_job.assign(&child.child) {
+        let taskkill = Command::new("taskkill")
+            .args(["/PID", &child.process_id.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let direct_kill = child.child.kill();
+        let waited = child.child.wait();
+        return Err(watchdog_cleanup_diagnostic(
+            label,
+            &stdout_path,
+            &stderr_path,
+            format!(
+                "assign root to Job Object failed: {error}; taskkill={taskkill:?}; direct kill={direct_kill:?}; wait={waited:?}"
+            ),
+        ));
+    }
+    #[cfg(windows)]
+    if let Err(error) = child.windows_job.resume_primary_thread(child.process_id) {
+        let cleanup = child.terminate_tree(label);
+        return Err(watchdog_cleanup_diagnostic(
+            label,
+            &stdout_path,
+            &stderr_path,
+            format!("resume suspended root failed: {error}; cleanup: {cleanup:?}"),
+        ));
+    }
     let (status, timed_out) = loop {
-        match child.0.try_wait() {
+        match child.child.try_wait() {
             Ok(Some(status)) => break (Some(status), false),
             Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
-            Ok(None) => {
-                let _ = child.0.kill();
-                break (child.0.wait().ok(), true);
+            Ok(None) => match child.terminate_tree(label) {
+                Ok(status) => break (status, true),
+                Err(error) => return Err(watchdog_cleanup_diagnostic(label, &stdout_path, &stderr_path, error)),
+            },
+            Err(error) => {
+                let cleanup = child.terminate_tree(label);
+                return Err(watchdog_cleanup_diagnostic(
+                    label,
+                    &stdout_path,
+                    &stderr_path,
+                    format!("poll {label}: {error}; cleanup: {cleanup:?}"),
+                ));
             }
-            Err(error) => return Err(format!("poll {label}: {error}")),
         }
     };
+    if let Err(error) = child.terminate_tree(label) {
+        return Err(watchdog_cleanup_diagnostic(
+            label,
+            &stdout_path,
+            &stderr_path,
+            format!("status={:?}; {error}", status.and_then(|status| status.code())),
+        ));
+    }
     let stdout = fs::read(&stdout_path).map_err(|error| format!("read stdout log: {error}"))?;
     let stderr = fs::read(&stderr_path).map_err(|error| format!("read stderr log: {error}"))?;
     Ok(CapturedOutput {
@@ -82,6 +494,16 @@ fn run_with_watchdog(mut command: Command, timeout: Duration, label: &str) -> Re
         stderr,
         timed_out,
     })
+}
+
+fn watchdog_cleanup_diagnostic(label: &str, stdout: &Path, stderr: &Path, error: String) -> String {
+    let stdout = fs::read(stdout).unwrap_or_default();
+    let stderr = fs::read(stderr).unwrap_or_default();
+    format!(
+        "{label}: {error}; status=unavailable; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&stdout),
+        String::from_utf8_lossy(&stderr),
+    )
 }
 
 fn output_diagnostic(program: &CodeBlock, name: &str, result: &CapturedOutput, timeout: Duration) -> String {
@@ -612,21 +1034,37 @@ fn test_documentation_programs_compile_and_run_in_a_standalone_consumer() {
     let manifest = cargo_consumer_manifest("tokio-executor-doc-examples", &dependencies, &root, &programs);
     fs::write(temporary.0.join("Cargo.toml"), manifest).expect("consumer manifest should be written");
     let target = temporary.0.join("target");
-    let build = Command::new("cargo")
+    let locations = programs
+        .iter()
+        .map(|program| format!("{}:{}-{}", program.document, program.start_line, program.end_line))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let build_timeout = parse_build_timeout(std::env::var_os(BUILD_TIMEOUT_ENV)).unwrap_or_else(|error| {
+        panic!(
+            "consumer build timeout configuration failed; status=unavailable; stdout/stderr unavailable because build did not start; document sources: {locations}; {error}"
+        )
+    });
+    let mut build_command = Command::new("cargo");
+    build_command
         .arg("build")
         .arg("--bins")
         .arg("--manifest-path")
         .arg(temporary.0.join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", &target)
-        .current_dir(&temporary.0)
-        .output()
-        .expect("cargo build should start");
+        .current_dir(&temporary.0);
+    let build = run_with_watchdog(build_command, build_timeout, "consumer build")
+        .unwrap_or_else(|error| {
+            panic!(
+                "consumer build failed after {build_timeout:?}; status/stdout/stderr unavailable where build did not start; document sources: {locations}; {error}"
+            )
+        });
     assert!(
-        build.status.success(),
-        "consumer build failed ({:?}):\nstdout:\n{}\nstderr:\n{}",
-        build.status.code(),
+        !build.timed_out && build.status.is_some_and(|status| status.success()),
+        "consumer build {} after {build_timeout:?}; status={:?}; stdout:\n{}\nstderr:\n{}\ndocument sources: {locations}",
+        if build.timed_out { "timed out" } else { "failed" },
+        build.status.and_then(|status| status.code()),
         String::from_utf8_lossy(&build.stdout),
-        String::from_utf8_lossy(&build.stderr)
+        String::from_utf8_lossy(&build.stderr),
     );
     for (index, program) in programs.iter().enumerate() {
         let name = format!("doc_example_{index}");
@@ -649,7 +1087,7 @@ fn test_document_example_watchdog_child() {
         return;
     };
     let ready = PathBuf::from(std::env::var_os("QUBIT_DOC_EXAMPLE_WATCHDOG_READY").expect("ready marker path"));
-    fs::write(ready, "ready").expect("child should signal startup");
+    fs::write(&ready, "ready").expect("child should signal startup");
     match mode.as_str() {
         "success" => println!("child success"),
         "failure" => {
@@ -659,6 +1097,49 @@ fn test_document_example_watchdog_child() {
         "hang" => loop {
             thread::park_timeout(Duration::from_secs(1));
         },
+        "descendant" => {
+            let pid_file = PathBuf::from(std::env::var_os("QUBIT_DOC_EXAMPLE_WATCHDOG_PID").expect("pid file path"));
+            let temporary_pid_file = pid_file.with_extension("pid.tmp");
+            fs::write(&temporary_pid_file, std::process::id().to_string()).expect("descendant should write its pid");
+            fs::rename(&temporary_pid_file, &pid_file).expect("descendant pid should be published atomically");
+            loop {
+                thread::park_timeout(Duration::from_secs(1));
+            }
+        }
+        #[cfg(unix)]
+        "root-with-descendant" | "root-exits-with-descendant" => {
+            let pid_file = PathBuf::from(std::env::var_os("QUBIT_DOC_EXAMPLE_WATCHDOG_PID").expect("pid file path"));
+            let executable = std::env::current_exe().expect("test executable path");
+            let status = Command::new("sh")
+                .args([
+                    "-c",
+                    "\"$1\" --exact test_document_example_watchdog_child --nocapture & while [ ! -s \"$2\" ]; do sleep 0.01; done",
+                    "watchdog-launcher",
+                ])
+                .arg(executable)
+                .arg(&pid_file)
+                .env(CHILD_MODE, "descendant")
+                .env("QUBIT_DOC_EXAMPLE_WATCHDOG_READY", &ready)
+                .env("QUBIT_DOC_EXAMPLE_WATCHDOG_PID", &pid_file)
+                .status()
+                .expect("descendant launcher should start");
+            assert!(
+                status.success(),
+                "descendant launcher should exit successfully: {status}"
+            );
+            fs::write(&ready, "root-ready").expect("root should signal descendant startup");
+            println!("root output before watchdog completion");
+            if mode == "root-exits-with-descendant" {
+                return;
+            }
+            loop {
+                thread::park_timeout(Duration::from_secs(1));
+            }
+        }
+        #[cfg(not(unix))]
+        "root-with-descendant" | "root-exits-with-descendant" => {
+            panic!("descendant process-tree harness is only run on Unix")
+        }
         "large-output" => {
             print!("{}", "o".repeat(256 * 1024));
             eprint!("{}", "e".repeat(256 * 1024));
@@ -727,6 +1208,77 @@ fn test_document_example_watchdog_handles_exit_output_and_hang() {
     assert!(result.status.is_some(), "timed-out child should be waited/reaped");
 }
 
+#[cfg(unix)]
+#[test]
+fn test_document_example_watchdog_cleans_descendants_when_root_hangs_or_exits() {
+    fn is_running(pid: u32) -> bool {
+        let output = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output();
+        match output {
+            Ok(output) if output.status.success() => {
+                let state = String::from_utf8_lossy(&output.stdout);
+                let Some(state) = state.split_whitespace().next() else {
+                    return false;
+                };
+                !state.starts_with('Z') && !state.starts_with('X')
+            }
+            Ok(_) => false,
+            Err(_) => true,
+        }
+    }
+
+    for mode in ["root-with-descendant", "root-exits-with-descendant"] {
+        let directory = TempDir::new("watchdog-tree");
+        let ready = directory.0.join("ready");
+        let pid_file = directory.0.join("descendant-pid");
+        let command = {
+            let mut command = Command::new(std::env::current_exe().expect("test executable path"));
+            command
+                .args(["--exact", "test_document_example_watchdog_child", "--nocapture"])
+                .env(CHILD_MODE, mode)
+                .env("QUBIT_DOC_EXAMPLE_WATCHDOG_READY", &ready)
+                .env("QUBIT_DOC_EXAMPLE_WATCHDOG_PID", &pid_file);
+            command
+        };
+        let (sender, receiver) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(run_with_watchdog(command, Duration::from_secs(1), mode));
+        });
+        let handshake_deadline = Instant::now() + Duration::from_secs(5);
+        while (!ready.exists() || !pid_file.exists()) && Instant::now() < handshake_deadline {
+            thread::sleep(POLL_INTERVAL);
+        }
+        assert!(
+            ready.exists() && pid_file.exists(),
+            "root/descendant handshake failed for {mode}"
+        );
+        let descendant: u32 = fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+        let result = receiver
+            .recv_timeout(Duration::from_secs(8))
+            .expect("watchdog must finish within external bound")
+            .expect("watchdog should supervise tree");
+        if mode == "root-with-descendant" {
+            assert!(result.timed_out, "live root should time out");
+        } else {
+            assert!(!result.timed_out, "already-exited root should be a normal exit");
+        }
+        assert!(result.status.is_some(), "watchdog should reap root");
+        assert!(
+            String::from_utf8_lossy(&result.stdout).contains("root output before watchdog completion"),
+            "watchdog should preserve root output"
+        );
+        let stop_deadline = Instant::now() + Duration::from_secs(3);
+        while is_running(descendant) && Instant::now() < stop_deadline {
+            thread::sleep(POLL_INTERVAL);
+        }
+        assert!(
+            !is_running(descendant),
+            "descendant {descendant} kept running after {mode}"
+        );
+    }
+}
+
 #[test]
 fn test_install_parser_rejects_invalid_toml_and_missing_required_features() {
     assert!(parse_install_toml("[dependencies]\ntokio { version = \"1\" }").is_err());
@@ -737,6 +1289,27 @@ fn test_install_parser_rejects_invalid_toml_and_missing_required_features() {
     let error = validate_document_dependencies(missing_feature, "missing-feature.md", "0.12.0", manifest)
         .expect_err("missing Tokio feature should be rejected");
     assert!(error.contains("missing `rt-multi-thread` feature"), "{error}");
+}
+
+#[test]
+fn test_build_timeout_parsing() {
+    assert_eq!(parse_build_timeout(None).unwrap(), Duration::from_secs(600));
+    assert_eq!(parse_build_timeout(Some("1".into())).unwrap(), Duration::from_secs(1));
+    assert_eq!(
+        parse_build_timeout(Some("600".into())).unwrap(),
+        Duration::from_secs(600)
+    );
+    for invalid in ["0", "-1", "abc", "18446744073709551616", "18446744073709551615"] {
+        assert!(
+            parse_build_timeout(Some(invalid.into())).is_err(),
+            "accepted {invalid:?}"
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        assert!(parse_build_timeout(Some(std::ffi::OsString::from_vec(vec![0xff]))).is_err());
+    }
 }
 
 #[test]

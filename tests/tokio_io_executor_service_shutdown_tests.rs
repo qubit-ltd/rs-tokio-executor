@@ -228,26 +228,36 @@ async fn test_tokio_io_executor_service_stop_ignores_completed_tasks() {
 #[tokio::test]
 async fn test_tokio_io_executor_service_stop_sets_stopping_while_task_runs() {
     let service = TokioIoExecutorService::new(tokio::runtime::Handle::current());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = service
         .spawn(async move {
+            started_tx.send(()).expect("start should be observed");
             release_rx.await.expect("release signal should arrive");
             Ok::<(), io::Error>(())
         })
         .expect("service should accept future");
-    tokio::task::yield_now().await;
+    tokio::time::timeout(Duration::from_secs(5), started_rx)
+        .await
+        .expect("task should start")
+        .expect("start should be signalled");
 
     let report = service.stop();
 
-    assert!(report.running >= 1);
+    assert_eq!(report.running, 1);
+    assert_eq!(report.cancelled, 1);
     assert!(service.is_stopping() || service.is_terminated());
-    drop(release_tx);
-    assert!(matches!(
-        handle.await,
-        Err(TaskExecutionError::Cancelled) | Err(TaskExecutionError::Panicked) | Ok(())
-    ));
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("cancelled task should resolve");
+    assert!(matches!(result, Err(TaskExecutionError::Cancelled)));
+    tokio::time::timeout(Duration::from_secs(5), service.await_termination())
+        .await
+        .expect("service should terminate");
+    assert_eq!(service.stats().accepted_unfinished, 0);
     assert!(service.is_terminated());
+    drop(release_tx);
 }
 
 #[tokio::test]
