@@ -626,172 +626,77 @@ fn normalize_code(source: &str) -> String {
         .to_owned()
 }
 
-/// Parses the deliberately small TOML dependency-table syntax used by these
-/// docs: one `[dependencies]` table, bare crate keys, quoted version strings,
-/// and inline tables with `version` plus a string `features` array. It rejects
-/// unsupported syntax rather than treating an unparsed snippet as valid.
+/// Parses a TOML installation snippet and validates the dependency fields used
+/// by the project documentation.
 fn parse_install_toml(source: &str) -> Result<BTreeMap<String, Dependency>, String> {
-    let mut in_dependencies = false;
-    let mut saw_dependencies = false;
+    let document: toml::Value = toml::from_str(source).map_err(|error| error.to_string())?;
+    let root = document
+        .as_table()
+        .ok_or_else(|| "TOML document must be a table".to_owned())?;
+    for key in root.keys() {
+        if key != "dependencies" {
+            return Err(format!("unsupported root field {key:?}; expected only `dependencies`"));
+        }
+    }
+    let dependency_table = root
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .ok_or_else(|| "missing or invalid `dependencies` table".to_owned())?;
+    if dependency_table.is_empty() {
+        return Err("`dependencies` table is empty".to_owned());
+    }
+
     let mut dependencies = BTreeMap::new();
-    for (index, raw_line) in source.lines().enumerate() {
-        let line_number = index + 1;
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') {
-            if line != "[dependencies]" || saw_dependencies {
-                return Err(format!("line {line_number}: unsupported or duplicate table {line:?}"));
+    for (name, value) in dependency_table {
+        let dependency = if let Some(version) = value.as_str() {
+            if version.is_empty() {
+                return Err(format!("dependency {name:?} field `version` must not be empty"));
             }
-            in_dependencies = true;
-            saw_dependencies = true;
-            continue;
-        }
-        if !in_dependencies {
-            return Err(format!("line {line_number}: dependency entry outside [dependencies]"));
-        }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or_else(|| format!("line {line_number}: expected `name = value`"))?;
-        let key = key.trim();
-        if key.is_empty()
-            || !key
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-        {
-            return Err(format!("line {line_number}: invalid bare dependency key {key:?}"));
-        }
-        let dependency =
-            parse_dependency_value(value.trim()).map_err(|error| format!("line {line_number}: {error}"))?;
-        if dependencies.insert(key.to_owned(), dependency).is_some() {
-            return Err(format!("line {line_number}: duplicate dependency {key:?}"));
-        }
-    }
-    if !saw_dependencies {
-        return Err("missing [dependencies] table".to_owned());
-    }
-    if dependencies.is_empty() {
-        return Err("[dependencies] table is empty".to_owned());
+            Dependency {
+                version: version.to_owned(),
+                features: Vec::new(),
+            }
+        } else if let Some(fields) = value.as_table() {
+            for field in fields.keys() {
+                if field != "version" && field != "features" {
+                    return Err(format!("dependency {name:?} has unsupported field {field:?}"));
+                }
+            }
+            let version = fields
+                .get("version")
+                .and_then(toml::Value::as_str)
+                .filter(|version| !version.is_empty())
+                .ok_or_else(|| format!("dependency {name:?} field `version` must be a non-empty string"))?;
+            let features = match fields.get("features") {
+                None => Vec::new(),
+                Some(value) => value
+                    .as_array()
+                    .ok_or_else(|| format!("dependency {name:?} field `features` must be an array of strings"))?
+                    .iter()
+                    .enumerate()
+                    .map(|(index, feature)| {
+                        feature
+                            .as_str()
+                            .filter(|feature| !feature.is_empty())
+                            .map(str::to_owned)
+                            .ok_or_else(|| {
+                                format!("dependency {name:?} field `features` item {index} must be a non-empty string")
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            };
+            Dependency {
+                version: version.to_owned(),
+                features,
+            }
+        } else {
+            return Err(format!(
+                "dependency {name:?} must be a version string or a table with `version` and optional `features`"
+            ));
+        };
+        dependencies.insert(name.clone(), dependency);
     }
     Ok(dependencies)
-}
-
-fn parse_dependency_value(value: &str) -> Result<Dependency, String> {
-    if value.starts_with('"') {
-        return Ok(Dependency {
-            version: parse_quoted_string(value)?,
-            features: Vec::new(),
-        });
-    }
-    if !value.starts_with('{') || !value.ends_with('}') {
-        return Err("expected a quoted version or inline dependency table".to_owned());
-    }
-    let mut version = None;
-    let mut features = Vec::new();
-    let mut saw_features = false;
-    let entries = split_top_level(&value[1..value.len() - 1], ',')?;
-    for entry in entries {
-        let entry = entry.trim();
-        if entry.is_empty() {
-            continue;
-        }
-        let (key, value) = entry
-            .split_once('=')
-            .ok_or_else(|| format!("invalid inline table entry {entry:?}"))?;
-        match key.trim() {
-            "version" => {
-                if version.is_some() {
-                    return Err("duplicate `version` field".to_owned());
-                }
-                version = Some(parse_quoted_string(value.trim())?);
-            }
-            "features" => {
-                if saw_features {
-                    return Err("duplicate `features` field".to_owned());
-                }
-                saw_features = true;
-                features = parse_string_array(value.trim())?;
-            }
-            other => return Err(format!("unsupported inline field {other:?}")),
-        }
-    }
-    Ok(Dependency {
-        version: version.ok_or_else(|| "missing `version` field".to_owned())?,
-        features,
-    })
-}
-
-fn parse_quoted_string(value: &str) -> Result<String, String> {
-    if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
-        return Err("expected a double-quoted TOML string".to_owned());
-    }
-    let inner = &value[1..value.len() - 1];
-    if inner.contains('"') || inner.contains('\\') || inner.contains('\n') {
-        return Err("escapes and embedded quotes are outside the supported TOML subset".to_owned());
-    }
-    if inner.is_empty() {
-        return Err("version string must not be empty".to_owned());
-    }
-    Ok(inner.to_owned())
-}
-
-fn parse_string_array(value: &str) -> Result<Vec<String>, String> {
-    if !value.starts_with('[') || !value.ends_with(']') {
-        return Err("`features` must be a TOML array".to_owned());
-    }
-    let contents = &value[1..value.len() - 1];
-    if contents.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    split_top_level(contents, ',')?
-        .into_iter()
-        .map(|item| parse_quoted_string(item.trim()))
-        .collect()
-}
-
-fn split_top_level(source: &str, delimiter: char) -> Result<Vec<&str>, String> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut depth = 0_i32;
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, ch) in source.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if quoted && ch == '\\' {
-            escaped = true;
-            continue;
-        }
-        if ch == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if quoted {
-            continue;
-        }
-        match ch {
-            '[' | '{' => depth += 1,
-            ']' | '}' => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err("unbalanced inline TOML delimiters".to_owned());
-                }
-            }
-            ch if ch == delimiter && depth == 0 => {
-                parts.push(&source[start..index]);
-                start = index + ch.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    if quoted || escaped || depth != 0 {
-        return Err("unbalanced inline TOML delimiters or quotes".to_owned());
-    }
-    parts.push(&source[start..]);
-    Ok(parts)
 }
 
 fn extract_toml_blocks(document: &str, source: &str) -> Result<Vec<(usize, String)>, String> {
@@ -1288,9 +1193,106 @@ fn test_document_example_watchdog_cleans_descendants_when_root_hangs_or_exits() 
 }
 
 #[test]
+fn test_install_parser_accepts_valid_toml_syntax() {
+    let source = r#"
+        [dependencies]
+        qubit-tokio-executor = '0.12' # valid comment
+        qubit-executor = "0.9\u002e1"
+        tokio = {
+            version = '1.54',
+            features = [
+                'macros',
+                'rt-multi-thread',
+                'time',
+            ],
+        }
+    "#;
+    let parsed = parse_install_toml(source).expect("valid TOML dependency syntax should parse");
+    assert_eq!(parsed["qubit-tokio-executor"].version, "0.12");
+    assert_eq!(parsed["qubit-executor"].version, "0.9.1");
+    assert_eq!(
+        parsed["tokio"],
+        Dependency {
+            version: "1.54".to_owned(),
+            features: vec!["macros".to_owned(), "rt-multi-thread".to_owned(), "time".to_owned()],
+        }
+    );
+}
+
+#[test]
 fn test_install_parser_rejects_invalid_toml_and_missing_required_features() {
-    assert!(parse_install_toml("[dependencies]\ntokio { version = \"1\" }").is_err());
-    assert!(parse_install_toml("[dependencies]\ntokio = \"1\"\ntokio = \"1\"").is_err());
+    let invalid = [
+        ("missing dependencies", "", None),
+        ("empty dependencies", "[dependencies]", None),
+        (
+            "duplicate dependency key",
+            "[dependencies]\ntokio = \"1\"\ntokio = \"1\"",
+            None,
+        ),
+        (
+            "duplicate dependencies table",
+            "[dependencies]\ntokio = \"1\"\n[dependencies]\nqubit-executor = \"0.9.1\"",
+            None,
+        ),
+        ("invalid TOML syntax", "[dependencies]\ntokio { version = \"1\" }", None),
+        (
+            "extra root table",
+            "[dependencies]\ntokio = \"1\"\n[features]\ndefault = []",
+            None,
+        ),
+        (
+            "non-string shorthand version",
+            "[dependencies]\ntokio = 1",
+            Some(("tokio", "version")),
+        ),
+        (
+            "non-string table version",
+            "[dependencies]\ntokio = { version = 1 }",
+            Some(("tokio", "version")),
+        ),
+        (
+            "missing table version",
+            "[dependencies]\ntokio = { features = [] }",
+            Some(("tokio", "version")),
+        ),
+        (
+            "empty version",
+            "[dependencies]\ntokio = { version = \"\" }",
+            Some(("tokio", "version")),
+        ),
+        (
+            "non-array features",
+            "[dependencies]\ntokio = { version = \"1\", features = \"time\" }",
+            Some(("tokio", "features")),
+        ),
+        (
+            "non-string feature",
+            "[dependencies]\ntokio = { version = \"1\", features = [1] }",
+            Some(("tokio", "features")),
+        ),
+        (
+            "empty feature",
+            "[dependencies]\ntokio = { version = \"1\", features = [\"\"] }",
+            Some(("tokio", "features")),
+        ),
+        (
+            "unknown dependency field",
+            "[dependencies]\ntokio = { version = \"1\", default-features = false }",
+            Some(("tokio", "default-features")),
+        ),
+        (
+            "non-string dependency value",
+            "[dependencies]\ntokio = true",
+            Some(("tokio", "dependency")),
+        ),
+    ];
+    for (case, source, context) in invalid {
+        let error = parse_install_toml(source).expect_err(case);
+        if let Some((dependency, field)) = context {
+            assert!(error.contains(dependency), "{case}: {error}");
+            assert!(error.contains(field), "{case}: {error}");
+        }
+    }
     let missing_feature = "```toml\n[dependencies]\nqubit-tokio-executor = \"0.12\"\nqubit-executor = \"0.9.1\"\ntokio = { version = \"1.54\", features = [\"macros\", \"time\"] }\n```";
     let manifest =
         "[dependencies]\nqubit-executor = \"^0.9.1\"\ntokio = { version = \"^1.54\", features = [\"rt\", \"sync\"] }";
