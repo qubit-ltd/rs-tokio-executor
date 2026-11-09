@@ -90,7 +90,12 @@ async fn test_tokio_io_executor_service_stats_and_capacity_changes() {
         .await
         .expect("stop should publish a capacity change")
         .expect("capacity notification sender should remain open");
-    assert!(matches!(handle.await, Err(TaskExecutionError::Cancelled)));
-    service.await_termination().await;
+    let result = timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("stopped IO task should report cancellation within five seconds");
+    assert!(matches!(result, Err(TaskExecutionError::Cancelled)));
+    timeout(Duration::from_secs(5), service.await_termination())
+        .await
+        .expect("IO service should terminate within five seconds after cancellation");
     assert_eq!(service.stats().accepted_unfinished, 0);
 }
