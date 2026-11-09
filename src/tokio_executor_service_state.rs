@@ -215,7 +215,11 @@ impl TokioExecutorServiceState {
     /// * `marker` - Service-local task marker for the task that finished.
     pub(crate) fn remove_abort_handle(&self, marker: &Arc<TokioTaskRegistration>) {
         marker.finish();
-        self.lock_abort_handles().remove(&key(marker));
+        let removed = {
+            let mut handles = self.lock_abort_handles();
+            handles.remove(&key(marker))
+        };
+        drop(removed);
     }
 
     /// Aborts all currently tracked unfinished tasks.
