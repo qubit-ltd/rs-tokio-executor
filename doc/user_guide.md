@@ -434,6 +434,11 @@ domain from the work's blocking behavior, and use graceful `shutdown` when
 accepted tasks should finish.
 `TokioExecutor` is available for strategy-level blocking execution, but use the
 service types when you need lifecycle and task accounting.
+Do not wait for a service to terminate from a task that is still counted by that
+same service. This applies to both blocking and IO services: even after shutdown
+is requested, termination requires that task itself to finish. A tracked task
+may request shutdown, but termination should be awaited by a coordinator outside
+the service's tracked tasks.
 
 ## Further Reading
 

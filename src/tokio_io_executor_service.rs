@@ -351,6 +351,14 @@ impl TokioIoExecutorService {
     ///
     /// The future resolves after shutdown or stop has been requested and every
     /// accepted task has completed or observed Tokio cancellation.
+    ///
+    /// This wait does not request shutdown or stop. Another caller must close
+    /// admission if it is still open; otherwise this wait may never complete.
+    /// Do not await termination from a task still counted by this service:
+    /// that task's own completion is required for termination.
+    ///
+    /// This wait does not drive the bound runtime. Keep that runtime alive and
+    /// driven so accepted futures and cancellation cleanup can make progress.
     pub async fn await_termination(&self) {
         self.state.await_termination().await;
     }

@@ -33,8 +33,14 @@ async fn test_tokio_executor_service_state_tracks_shutdown_and_active_tasks() {
     assert!(service.is_not_running());
     assert!(!service.is_terminated());
     release_tx.send(()).unwrap();
-    handle.await.unwrap();
-    service.wait_termination();
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("task result should arrive within five seconds after release")
+        .expect("released blocking task should succeed");
+    assert!(
+        service.wait_termination_timeout(Duration::from_secs(5)),
+        "service should terminate within five seconds after task completion"
+    );
     assert_eq!(service.lifecycle(), ExecutorServiceLifecycle::Terminated);
     assert!(service.is_terminated());
 }
