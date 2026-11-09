@@ -108,3 +108,16 @@ fn test_concurrency_design_links_resolve_to_project_files() {
         assert!(std::path::Path::new(target).is_file(), "{target} must exist");
     }
 }
+
+/// Ensures the IO service runtime guide links use this crate's release version.
+#[test]
+fn test_io_runtime_guide_links_are_release_pinned() {
+    let source = read_project_file("src/tokio_io_executor_service.rs");
+    let version = package_version();
+    let expected = format!(
+        "https://github.com/qubit-ltd/rs-tokio-executor/blob/v{version}/doc/user_guide.md#runtime-lifetime-and-driver-progress"
+    );
+
+    assert_eq!(source.matches(&expected).count(), 2);
+    assert!(!source.contains("https://github.com/qubit-ltd/rs-tokio-executor/blob/main/doc/"));
+}
