@@ -260,7 +260,8 @@ async fn test_concurrent_admission_reserves_only_one_slot() {
             .count(),
         1
     );
-    assert_eq!((service.stats().queued + service.stats().running), 1);
+    let stats = service.stats();
+    assert_eq!(stats.queued + stats.running, 1);
     release.release();
     for worker in workers {
         worker.join().expect("submitter should exit");
