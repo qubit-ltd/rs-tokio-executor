@@ -602,11 +602,44 @@ impl ExecutorService for TokioExecutorService {
     }
 
     /// Blocks until the service has terminated.
+    ///
+    /// This wait does not request shutdown or stop. Another caller must
+    /// request closure if it has not already been requested. Without a
+    /// shutdown or stop request, this wait can block forever. Do not wait for
+    /// this service to terminate from one of its own active tasks: that task
+    /// itself prevents termination. This synchronous method blocks the
+    /// current thread; do not block a runtime driver needed by the outstanding
+    /// work.
+    ///
+    /// Termination describes service accounting. It does not guarantee that
+    /// Tokio has destroyed cancelled queued closures or their captures.
+    ///
+    /// See the [runtime guide](https://github.com/qubit-ltd/rs-tokio-executor/blob/v0.12.0/doc/user_guide.md#runtime-lifetime-and-driver-progress)
+    /// for runtime lifetime and driver requirements.
     fn wait_termination(&self) {
         self.state.wait_termination();
     }
 
     /// Waits at most `timeout` for the blocking Tokio service to terminate.
+    ///
+    /// This wait does not request shutdown or stop. Another caller must
+    /// request closure if it has not already been requested. Do not wait for
+    /// this service to terminate from one of its own active tasks: that task
+    /// itself prevents termination. This synchronous method blocks the
+    /// current thread; do not block a runtime driver needed by the outstanding
+    /// work.
+    ///
+    /// Termination describes service accounting. It does not guarantee that
+    /// Tokio has destroyed cancelled queued closures or their captures.
+    ///
+    /// See the [runtime guide](https://github.com/qubit-ltd/rs-tokio-executor/blob/v0.12.0/doc/user_guide.md#runtime-lifetime-and-driver-progress)
+    /// for runtime lifetime and driver requirements.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the service reaches termination before the wait expires, or
+    /// `false` if the timeout expires first. A zero timeout only probes the
+    /// termination condition.
     ///
     /// # Parameters
     ///
@@ -618,6 +651,16 @@ impl ExecutorService for TokioExecutorService {
 
 impl TokioExecutorService {
     /// Waits asynchronously until the service has terminated.
+    ///
+    /// This wait does not request shutdown or stop and does not drive the bound
+    /// runtime. Do not await termination from a task still counted by this
+    /// service: its own completion is required for termination.
+    ///
+    /// Termination describes service accounting. It does not guarantee that
+    /// Tokio has destroyed cancelled queued closures or their captures.
+    ///
+    /// See the [runtime guide](https://github.com/qubit-ltd/rs-tokio-executor/blob/v0.12.0/doc/user_guide.md#runtime-lifetime-and-driver-progress)
+    /// for runtime lifetime and driver requirements.
     ///
     /// # Returns
     ///
