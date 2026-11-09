@@ -984,7 +984,15 @@ fn cargo_consumer_manifest(
     manifest.push_str("\n[patch.crates-io]\nqubit-tokio-executor = { path = ");
     manifest.push_str(&format!("{:?}", crate_root.to_string_lossy()));
     manifest.push_str(" }\n");
-    if let Some(executor_path) = std::env::var_os("QUBIT_EXECUTOR_PATCH_PATH") {
+    let executor_path = std::env::var_os("QUBIT_EXECUTOR_PATCH_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            crate_root
+                .parent()
+                .map(|workspace| workspace.join("rs-executor"))
+                .filter(|path| path.join("Cargo.toml").is_file())
+        });
+    if let Some(executor_path) = executor_path {
         manifest.push_str("qubit-executor = { path = ");
         manifest.push_str(&format!("{:?}", executor_path.to_string_lossy()));
         manifest.push_str(" }\n");
