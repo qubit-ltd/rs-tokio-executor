@@ -40,7 +40,9 @@ use crate::tokio_task_slot_cancellation::take_task_slot;
 /// Tokio-backed service for submitted blocking tasks.
 ///
 /// The service accepts fallible [`Runnable`] and [`Callable`] tasks and runs
-/// them through Tokio's blocking task pool.
+/// them through Tokio's blocking task pool. Pure synchronous callables can run
+/// without driving a current-thread runtime; async work that a callable waits
+/// on still requires that runtime to be driven.
 ///
 /// # Examples
 ///

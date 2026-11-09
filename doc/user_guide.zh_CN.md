@@ -17,9 +17,9 @@
 
 ## Runtime 存活与驱动推进
 
-在已接收的任务结束前，既要让创建 `Handle` 的 runtime 保持存活，也要让 Tokio 有机会调度任务和处理取消。多线程 runtime 运行期间会持续驱动 worker；current-thread runtime 则只会在所属线程执行 `Runtime::block_on` 时推进。单独持有 `Handle` 不会让任务运行。
+在已接收的任务结束前，应让创建 `Handle` 的 runtime 保持存活。绑定 runtime 上的异步任务需要 runtime 获得驱动，Tokio 才能轮询任务并处理取消。多线程 runtime 运行期间会持续驱动 worker；current-thread runtime 只有在所属线程执行 `Runtime::block_on` 时才会推进异步任务。单独持有 `Handle` 不会推动异步任务。通过 `TokioExecutor` 和 `TokioExecutorService` 提交的同步 callable 在 Tokio blocking pool 上运行，单纯执行它们不需要调用 `block_on`。如果 callable 等待绑定 runtime 上的异步任务，该异步任务仍需要 runtime 获得驱动。
 
-例如，在另一个 runtime 中 await `TokioTaskHandle`，只会等待句柄结果，不会替绑定的 current-thread runtime 执行任务。应由绑定 runtime 的所有者调用 `block_on`，或让应用继续运行在该 runtime 中，直到任务和服务结束。`stop` 发出 abort 请求后，也需要 runtime 继续运行，Tokio 才能销毁被取消的 future 并更新服务计数。在其他 runtime 中等待 `await_termination()` 同样不会推进绑定的 current-thread runtime。不要在负责驱动任务的线程上同步等待该任务；应采用异步等待，同时让 runtime 继续调度。
+例如，在另一个 runtime 中 await `TokioTaskHandle`，只会等待句柄结果，不会替绑定的 current-thread runtime 执行任务。应由绑定 runtime 的所有者调用 `block_on`，或让应用继续运行在该 runtime 中，直到任务和服务结束。`stop` 发出 abort 请求后，IO runtime 仍需继续运行，Tokio 才能销毁被取消的 future 并更新 IO 服务计数。在其他 runtime 中等待 `await_termination()` 同样不会推进绑定的 current-thread runtime。不要在负责驱动任务的线程上同步等待该任务；应采用异步等待，同时让 runtime 继续调度。
 
 ## 贯穿场景
 
@@ -335,7 +335,7 @@ runtime 关闭的表格场景来自已有回归测试，并不代表每种关闭
 
 ## 限制与最佳实践
 
-在需要的任务全部完成前，请让绑定的 runtime 保持存活并持续获得运行机会。不要在负责驱动任务的线程上同步等待这些任务，否则该线程无法继续调度它们。提交成功不代表任务成功；应根据工作是否阻塞选择执行域，并在希望已接收任务完成时使用优雅关闭 `shutdown`。`TokioExecutor` 适合策略级的阻塞执行；需要服务生命周期与任务计数时，使用两个 service 类型。
+在需要的任务全部完成前，请让绑定的 runtime 保持存活；异步任务或异步取消清理需要推进时，也要让 runtime 获得运行机会。纯同步 callable 由 Tokio blocking pool 执行，不需要调用 `block_on`；但它等待的异步任务仍需要被驱动。不要在负责驱动任务的 runtime 线程上同步等待这些任务，否则该线程无法继续调度它们。提交成功不代表任务成功；应根据工作是否阻塞选择执行域，并在希望已接收任务完成时使用优雅关闭 `shutdown`。`TokioExecutor` 适合策略级的阻塞执行；需要服务生命周期与任务计数时，使用两个 service 类型。
 
 不要从仍计入某个服务的任务中等待同一服务终止。这一限制同时适用于阻塞服务和 IO 服务：即使已经请求 shutdown，终止仍依赖该任务自身完成。任务可以请求关闭服务，但终止等待应由该服务跟踪的任务之外的协调者执行。
 

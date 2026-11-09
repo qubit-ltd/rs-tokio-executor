@@ -30,7 +30,9 @@ use qubit_function::Callable;
 ///   Tokio-driven async context after submission succeeds.
 /// * **Blocking pool** — the closure runs on Tokio's *blocking* thread pool,
 ///   not on the core async worker threads, so heavy synchronous work does not
-///   starve other async tasks on the runtime.
+///   starve other async tasks on the runtime. A pure synchronous callable can
+///   run while a current-thread runtime is idle; if it waits for async work
+///   bound to that runtime, the runtime must still be driven.
 /// * **Standard tracked-task cancellation** — the returned [`TrackedTask`] can
 ///   cancel the user callable before it starts, but it does not own Tokio's
 ///   [`AbortHandle`](tokio::task::AbortHandle). If the Tokio blocking queue has

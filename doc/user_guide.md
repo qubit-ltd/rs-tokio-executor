@@ -27,16 +27,20 @@ the service accepted the work; await its returned handle to learn its result.
 ## Runtime Lifetime and Driver Progress
 
 Keep the runtime that owns the supplied handle alive until its accepted work
-has finished. It also must be driven so Tokio can poll async work and process
-cancellation. A multi-thread runtime drives its workers while it is running. A
-current-thread runtime advances only while its owner is inside
-`Runtime::block_on`; merely holding its `Handle` does not make progress.
+has finished. Async work on that runtime must be driven so Tokio can poll it
+and process cancellation. A multi-thread runtime drives its workers while it
+is running. A current-thread runtime advances async work only while its owner
+is inside `Runtime::block_on`; merely holding its `Handle` does not make
+progress. Synchronous callables submitted through `TokioExecutor` and
+`TokioExecutorService` run on Tokio's blocking pool and do not need
+`block_on` merely to execute. If such a callable waits on async work tied to
+the bound runtime, that async work still needs the runtime to be driven.
 
 For example, awaiting a `TokioTaskHandle` inside another runtime polls that
 handle but does not drive the bound current-thread runtime. Drive the bound
 runtime with its own `block_on` (or keep the application running inside that
 runtime) until the task and service finish. `stop` requests aborts, but Tokio
-must still run to drop the cancelled futures and update service accounting.
+must still run to drop cancelled IO futures and update IO service accounting.
 Likewise, awaiting `await_termination()` from a different runtime does not
 advance a bound current-thread runtime. Do not synchronously wait on a task
 from the thread that must drive that task; use async waiting while the runtime
@@ -427,11 +431,14 @@ async tasks whose Tokio abort handle was signalled.
 
 ## Limitations and Best Practices
 
-Keep the bound runtime alive and driven until all desired work is complete. Do
-not block its driver thread waiting synchronously for tasks that need that
-thread to run. Do not treat acceptance as task success. Choose the execution
-domain from the work's blocking behavior, and use graceful `shutdown` when
-accepted tasks should finish.
+Keep the bound runtime alive until all desired work is complete, and keep it
+driven while async work or async cancellation cleanup needs progress. Pure
+synchronous callables run on Tokio's blocking pool without `block_on`, though
+any async work they await still needs a driver. Do not block a runtime driver
+thread waiting synchronously for tasks that need it to run. Do not treat
+acceptance as task success. Choose the execution domain from the work's
+blocking behavior, and use graceful `shutdown` when accepted tasks should
+finish.
 `TokioExecutor` is available for strategy-level blocking execution, but use the
 service types when you need lifecycle and task accounting.
 Do not wait for a service to terminate from a task that is still counted by that

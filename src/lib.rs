@@ -65,9 +65,12 @@
 //! interrupted after it starts. Service capacity and shutdown describe the
 //! service's admission and accounting state, not whether Tokio's runtime is
 //! alive. A runtime [`Handle`](tokio::runtime::Handle) neither owns nor drives
-//! its runtime. Keep the runtime alive while work is outstanding, and drive a
-//! current-thread runtime through its owner (for example with
-//! [`Runtime::block_on`](tokio::runtime::Runtime::block_on)).
+//! its runtime. Keep the runtime alive while work is outstanding. Async work
+//! on a current-thread runtime needs its owner to drive it (for example with
+//! [`Runtime::block_on`](tokio::runtime::Runtime::block_on)); synchronous
+//! callables on Tokio's blocking pool do not need `block_on` merely to execute.
+//! If a blocking callable waits on async work bound to that runtime, the async
+//! work still needs runtime progress.
 //!
 //! # Further reading
 //!

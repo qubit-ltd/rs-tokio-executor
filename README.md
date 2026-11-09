@@ -23,11 +23,15 @@ tokio = { version = "1.54", features = ["macros", "rt-multi-thread", "time"] }
 
 The crate does not create or own a Tokio runtime. Construct a service with the
 application's `tokio::runtime::Handle`, and keep that runtime alive while work
-may run. A handle does not drive the runtime: a current-thread runtime advances
-only while its owner calls `Runtime::block_on`. Awaiting a task handle from a
-different runtime does not drive the bound runtime, and `stop` cleanup also
-needs that runtime to make progress. Submission errors reflect service
-admission rather than runtime liveness; see the [diagnostics guide](doc/user_guide.md#errors-and-diagnostics).
+may run. A handle does not drive the runtime: async work on a current-thread
+runtime advances only while its owner calls `Runtime::block_on`. Synchronous
+callables submitted with `TokioExecutor` or `TokioExecutorService` run on
+Tokio's blocking pool and do not need `block_on` merely to execute. If a
+blocking callable waits on async work tied to that runtime, that async work
+still needs the runtime to be driven. Keep the runtime alive while work may
+run. Awaiting a task handle from a different runtime does not drive the bound
+runtime, and IO `stop` cleanup needs it to make progress. Submission errors
+reflect service admission rather than runtime liveness; see the [diagnostics guide](doc/user_guide.md#errors-and-diagnostics).
 
 ## Quick Start
 

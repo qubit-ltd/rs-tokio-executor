@@ -20,10 +20,13 @@ tokio = { version = "1.54", features = ["macros", "rt-multi-thread", "time"] }
 
 本 crate 不负责创建或持有 Tokio runtime。请用应用自身的
 `tokio::runtime::Handle` 构造服务，并让 runtime 持续运行到所有已提交任务结束。
-`Handle` 不会驱动 runtime：current-thread runtime 只有在持有它的线程调用
-`Runtime::block_on` 时才会推进。若在另一个 runtime 中等待任务句柄，也不会替绑定的
-runtime 执行任务；`stop` 后的清理同样需要绑定 runtime 获得运行机会。提交错误描述服务准入，
-不会探测 runtime 是否存活；详见[错误诊断指南](doc/user_guide.zh_CN.md#错误与诊断)。
+`Handle` 不会驱动 runtime：绑定的 current-thread runtime 上的异步任务，只有在其所有者调用
+`Runtime::block_on` 时才会推进。通过 `TokioExecutor` 或 `TokioExecutorService` 提交的同步
+callable 由 Tokio blocking pool 执行，单纯执行它们不需要调用 `block_on`。如果阻塞 callable
+等待绑定 runtime 上的异步任务，该异步任务仍需要 runtime 获得驱动。任务运行期间应让
+runtime 保持存活。在另一个 runtime 中等待任务句柄不会驱动绑定 runtime；IO service 的
+`stop` 清理也需要绑定 runtime 获得运行机会。提交错误描述服务准入，不会探测 runtime
+是否存活；详见[错误诊断指南](doc/user_guide.zh_CN.md#错误与诊断)。
 
 ## 快速开始
 
