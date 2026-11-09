@@ -42,8 +42,8 @@ qubit-executor = { version = "^0.9.1", path = "../rs-executor" }
 qubit-lock = { default-features = false, features = ["monitor", "parking-lot"], version = "^0.14" }
 
 [dev-dependencies]
-semver = "^1"
-toml = "^0.9"
+semver = "^1.0"
+toml = "^1.1"
 tokio = { version = "^1.54", features = ["macros", "rt-multi-thread", "time"] }
 
 [workspace]
