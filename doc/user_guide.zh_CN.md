@@ -325,7 +325,7 @@ runtime 关闭的表格场景来自已有回归测试，并不代表每种关闭
 
 | 现象 | 检查项 | 处理方式 |
 | --- | --- | --- |
-| 提交被拒绝 | `Shutdown` 表示已关闭，`Saturated` 表示容量已满 | 容量已满时，先订阅容量变化，等待通知后重试。 |
+| 提交被拒绝 | `Shutdown` 表示已关闭，`Saturated` 表示容量已满 | 首次提交前订阅容量变化；提交返回 `Saturated` 后等待通知再重试。若收到拒绝后才创建订阅，先立即重试，仍为 `Saturated` 时再等待；遇到 `Shutdown` 则结束重试。 |
 | 绑定的 runtime 关闭后仍接受了任务 | 提交检查服务准入，不探测 runtime 是否存活 | 检查返回句柄；若 Tokio 在执行前销毁任务，阻塞任务可能为 `Dropped`，IO 任务可能为 `Cancelled`。 |
 | 已接受的 IO 任务没有运行 | 绑定的 current-thread runtime 可能没有被驱动 | 由 runtime 所有者调用 `Runtime::block_on`；在另一个 runtime 中 await 任务句柄不会驱动它。 |
 | `stop` 后服务一直未终止 | Tokio 可能还没有处理任务的 abort 请求 | 保持绑定 runtime 有机会运行，并在该 runtime 上等待服务终止。 |

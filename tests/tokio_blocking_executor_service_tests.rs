@@ -66,21 +66,28 @@ async fn test_tokio_blocking_task_handle_try_get_reports_pending_then_ready() {
         .send(())
         .expect("blocking task should receive release signal");
 
-    loop {
-        match handle.try_get() {
-            TryGet::Ready(result) => {
-                assert_eq!(result.expect("tracked task should finish"), 7);
-                break;
-            }
-            TryGet::Pending(pending_handle) => {
-                handle = pending_handle;
-                tokio::task::yield_now().await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match handle.try_get() {
+                TryGet::Ready(result) => {
+                    assert_eq!(result.expect("tracked task should finish"), 7);
+                    break;
+                }
+                TryGet::Pending(pending_handle) => {
+                    handle = pending_handle;
+                    tokio::task::yield_now().await;
+                }
             }
         }
-    }
+    })
+    .await
+    .expect("released blocking task result remained Pending for 5 seconds");
 
     service.shutdown();
-    service.wait_termination();
+    assert!(
+        service.wait_termination_timeout(Duration::from_secs(5)),
+        "blocking service did not terminate within 5 seconds after result completion"
+    );
 }
 
 #[test]
