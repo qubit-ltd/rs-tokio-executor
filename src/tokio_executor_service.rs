@@ -12,6 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::MutexGuard;
+use qubit_executor::RecoverableExecutorService;
+use qubit_executor::RejectedTask as RecoverableRejectedTask;
 use qubit_executor::TaskHandle;
 use qubit_executor::service::ExecutorService;
 use qubit_executor::service::ExecutorServiceLifecycle;
@@ -646,6 +648,41 @@ impl ExecutorService for TokioExecutorService {
     /// * `timeout` - Maximum duration to wait for termination.
     fn wait_termination_timeout(&self, timeout: Duration) -> bool {
         self.state.wait_termination_timeout(timeout)
+    }
+}
+
+impl RecoverableExecutorService for TokioExecutorService {
+    /// Attempts to accept a callable while returning it unchanged if rejected.
+    ///
+    /// The existing inherent submission method performs admission. An accepted
+    /// callable is submitted through Tokio's blocking task pool; a rejected
+    /// callable has not been called or dropped and is returned with the common
+    /// executor rejection type.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `C` - The callable to submit.
+    /// * `R` - The callable's result type.
+    /// * `E` - The callable's error type.
+    ///
+    /// # Parameters
+    ///
+    /// * `task` - The callable to submit.
+    ///
+    /// # Returns
+    ///
+    /// A task handle when the callable is accepted, or the original callable
+    /// and rejection reason when admission fails.
+    fn try_submit_callable<C, R, E>(&self, task: C) -> Result<Self::ResultHandle<R, E>, RecoverableRejectedTask<C>>
+    where
+        C: Callable<R, E> + Send + 'static,
+        R: Send + 'static,
+        E: Send + 'static,
+    {
+        TokioExecutorService::try_submit_callable(self, task).map_err(|rejected| {
+            let (reason, task) = rejected.into_parts();
+            RecoverableRejectedTask::new(reason, task)
+        })
     }
 }
 
