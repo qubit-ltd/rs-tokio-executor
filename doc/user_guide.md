@@ -163,6 +163,16 @@ the application must retain it across cancellation. `RejectedTask` formats
 only the rejection reason with `Debug`, so task captures are not printed and
 the task type need not implement `Debug`.
 
+With capacity one, a parent task that waits to submit a child to the same
+service keeps the only slot occupied; asynchronous waiting does not release
+that slot. Separately, a blocking parent waiting for a child on the same
+blocking pool can exhaust its worker threads even when service capacity remains
+available. Keep orchestration outside the service's counted tasks, or account
+explicitly for capacity, available workers, and dependency depth. Raising
+either limit alone does not make arbitrary recursive dependencies safe. A
+`Saturated` rejection is the service's normal admission response and does not,
+by itself, indicate a deadlock.
+
 The following complete programs are also kept as standalone files: [callable retry](../examples/capacity_retry_callable.rs) and [future retry](../examples/capacity_retry_future.rs). Each subscribes before its first attempt, occupies a capacity-one service with a channel-controlled task, requires the first attempt to be `Saturated`, recovers the original task through `RejectedTask::into_parts()`, and retries after release. Both assert result 42 and one execution before shutdown and termination.
 
 Callable retry program:
@@ -422,6 +432,7 @@ async tasks whose Tokio abort handle was signalled.
 | Symptom | Check | Resolution |
 | --- | --- | --- |
 | Submission is rejected | The service may be shut down (`Shutdown`) or at capacity (`Saturated`) | For saturation, subscribe before submitting, wait for a change, then retry. |
+| A parent waits for a child submitted to the same service, and the child does not progress | Check whether the parent holds the last capacity slot, or whether blocking parents occupy the blocking pool's workers | Move orchestration outside the service's counted tasks, or explicitly account for capacity, worker availability, and dependency depth. A normal `Saturated` rejection alone is not a deadlock. |
 | A task is accepted after the bound runtime has shut down | Submission checks service admission, not runtime liveness | Inspect the returned handle; a blocking task may be `Dropped` and an IO task may be `Cancelled` if Tokio discards it before execution. |
 | An accepted IO task does not run | The bound current-thread runtime may be idle | Drive that runtime with its owner’s `Runtime::block_on`; awaiting from another runtime is not a driver. |
 | The service remains active after `stop` | Tokio may not have processed task aborts yet | Keep the bound runtime driven while awaiting service termination. |
