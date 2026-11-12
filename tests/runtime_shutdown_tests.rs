@@ -83,7 +83,9 @@ fn test_io_submission_after_runtime_shutdown_child() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
     let service = TokioIoExecutorService::new(runtime.handle().clone());
     let drop_service = service.clone();
-    runtime.shutdown_background();
+    // Wait for worker shutdown before testing submission to a closed runtime.
+    // Background shutdown can still own the receiver when spawn returns.
+    drop(runtime);
     let probe = ReentrantDrop(drop_service, action);
     let result = service.spawn(async move {
         let _probe = probe;
@@ -108,8 +110,8 @@ fn test_io_submission_after_runtime_shutdown_does_not_deadlock_on_drop() {
             ])
             .env(IO_REENTRANT_CHILD, "1")
             .env(IO_REENTRANT_ACTION, action)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()
             .expect("child test should start");
         let deadline = Instant::now() + OBSERVE_TIMEOUT;
@@ -164,8 +166,8 @@ fn test_blocking_submission_after_runtime_shutdown_does_not_deadlock_on_drop() {
             ])
             .env(BLOCKING_REENTRANT_CHILD, "1")
             .env(BLOCKING_REENTRANT_ACTION, action)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()
             .expect("child test should start");
         let deadline = Instant::now() + OBSERVE_TIMEOUT;
