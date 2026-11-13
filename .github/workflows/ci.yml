@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qubit-ltd/rs-executor
-          ref: 22c2cacf17546b72c8fc93137dd0768d1576915b
+          ref: 92e7e6abf8010df4846ae2e1649d6aab535c55aa
           path: rs-executor
       - name: Check out Rayon adapter
         uses: actions/checkout@v4
