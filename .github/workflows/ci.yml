@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qubit-ltd/rs-tokio-executor
-          ref: 8089849504155e75a17bda1e0976edcd9f21e689
+          ref: 9228b957a95df7512873d5762431839f1e567b52
           path: rs-tokio-executor
       - name: Check out thread pool
         uses: actions/checkout@v4
